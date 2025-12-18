@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "magento.fullname" . }}-setup
+  labels:
+    {{- include "magento.labels" . | nindent 4 }}
+data:
+  setup.sh: |
+    #!/bin/bash
+    set -ex
+
+    cd /var/www/html
+
+    {{- if .Values.gitSync.plugins }}
+    # Wait for git-sync to populate the repos
+    echo "Waiting for git-sync..."
+    {{- range .Values.gitSync.plugins }}
+    while [ ! -L /var/www/html/git-sync/{{ .name }}/code ]; do
+      sleep 2
+    done
+    {{- end }}
+    echo "Git-sync ready"
+
+    # Create symlinks for plugins
+    {{- range .Values.gitSync.plugins }}
+    mkdir -p $(dirname /var/www/html/{{ .path }})
+    rm -rf /var/www/html/{{ .path }}
+    ln -sf /var/www/html/git-sync/{{ .name }}/code /var/www/html/{{ .path }}
+    echo "Symlink created: {{ .path }} -> git-sync/{{ .name }}/code"
+    {{- end }}
+    {{- end }}
+
+    # Wait for database to be ready
+    until mysql -h 127.0.0.1 -u {{ .Values.database.user }} -p"$MYSQL_PASSWORD" --skip-ssl -e "SELECT 1" &>/dev/null; do
+      echo "Waiting for database..."
+      sleep 5
+    done
+
+    # Wait for OpenSearch to be ready
+    {{- if .Values.opensearch.enabled }}
+    until curl -s http://127.0.0.1:9200/_cluster/health &>/dev/null; do
+      echo "Waiting for OpenSearch..."
+      sleep 5
+    done
+    echo "OpenSearch is ready"
+    {{- end }}
+
+    # Check if Magento is already installed
+    if [ -f app/etc/env.php ]; then
+      echo "Magento already installed, running upgrade..."
+      bin/magento setup:upgrade
+      bin/magento cache:flush
+      bin/magento maintenance:disable
+      chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
+      exit 0
+    fi
+
+    # Initial setup
+    bin/magento setup:install \
+      --base-url="https://{{ .Values.magento.host }}/" \
+      --base-url-secure="https://{{ .Values.magento.host }}/" \
+      --db-host='127.0.0.1' \
+      --db-name='{{ .Values.database.name }}' \
+      --db-user='{{ .Values.database.user }}' \
+      --db-password="${MYSQL_PASSWORD}" \
+      --admin-firstname='{{ .Values.magento.adminFirstname }}' \
+      --admin-lastname='{{ .Values.magento.adminLastname }}' \
+      --admin-email='{{ .Values.magento.adminEmail }}' \
+      --admin-user='{{ .Values.magento.adminUser }}' \
+      --admin-password="${ADMIN_PASSWORD}" \
+      --language='{{ .Values.magento.language }}' \
+      --currency='{{ .Values.magento.currency }}' \
+      --timezone='{{ .Values.magento.timezone }}' \
+      --use-rewrites='1' \
+      --backend-frontname='admin' \
+      {{- if .Values.opensearch.enabled }}
+      --search-engine='opensearch' \
+      --opensearch-host='127.0.0.1' \
+      --opensearch-port='9200'
+      {{- end }}
+
+    # Disable 2FA for development
+    bin/magento module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true
+
+    bin/magento deploy:mode:set developer
+    bin/magento setup:upgrade
+    bin/magento indexer:reindex
+    bin/magento cache:flush
+    bin/magento maintenance:disable
+    chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
+
+    echo "Setup complete!"

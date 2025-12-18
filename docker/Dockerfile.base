@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1
+# Magento 2.4.8 Base Image - PHP 8.2 + Apache + Extensions
+# Build: docker buildx build -f Dockerfile.base -t ghcr.io/brtkwr/magento-base:php8.2 --push .
+FROM php:8.2-apache
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libwebp-dev \
+    libzip-dev \
+    libicu-dev \
+    libxslt1-dev \
+    libonig-dev \
+    libsodium-dev \
+    default-mysql-client \
+    git \
+    unzip \
+    curl \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure and install PHP extensions
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install -j$(nproc) \
+    gd \
+    bcmath \
+    intl \
+    pdo_mysql \
+    soap \
+    xsl \
+    zip \
+    opcache \
+    sockets \
+    sodium \
+    ftp
+
+# Enable Apache modules
+RUN a2enmod rewrite headers expires
+
+# Apache configuration for Magento (docroot = /var/www/html/pub)
+RUN echo '<Directory /var/www/html/pub>\n\
+    Options Indexes FollowSymLinks\n\
+    AllowOverride All\n\
+    Require all granted\n\
+</Directory>' > /etc/apache2/conf-available/magento.conf \
+    && a2enconf magento \
+    && sed -i 's|/var/www/html|/var/www/html/pub|g' /etc/apache2/sites-available/000-default.conf
+
+# PHP configuration for Magento
+RUN echo "memory_limit=2G" > /usr/local/etc/php/conf.d/magento.ini \
+    && echo "max_execution_time=1800" >> /usr/local/etc/php/conf.d/magento.ini \
+    && echo "max_input_time=1800" >> /usr/local/etc/php/conf.d/magento.ini \
+    && echo "upload_max_filesize=64M" >> /usr/local/etc/php/conf.d/magento.ini \
+    && echo "post_max_size=64M" >> /usr/local/etc/php/conf.d/magento.ini \
+    && echo "realpath_cache_size=10M" >> /usr/local/etc/php/conf.d/magento.ini \
+    && echo "realpath_cache_ttl=7200" >> /usr/local/etc/php/conf.d/magento.ini
+
+# OPcache configuration
+RUN echo "opcache.enable=1" > /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.memory_consumption=512" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.max_accelerated_files=60000" >> /usr/local/etc/php/conf.d/opcache.ini \
+    && echo "opcache.validate_timestamps=0" >> /usr/local/etc/php/conf.d/opcache.ini
+
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost/health_check.php || exit 1

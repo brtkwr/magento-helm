@@ -1,0 +1,105 @@
+# Magento Helm Chart Values
+# https://github.com/brtkwr/magento-helm
+
+image:
+  repository: ghcr.io/brtkwr/magento
+  tag: "2.4.8"
+  pullPolicy: IfNotPresent
+
+# Magento configuration
+magento:
+  host: magento.example.com
+  adminFirstname: Admin
+  adminLastname: User
+  adminEmail: admin@example.com
+  adminUser: admin
+  # adminPassword: set via --set or secrets
+  language: en_GB
+  currency: GBP
+  timezone: Europe/London
+
+# Database (MariaDB sidecar)
+database:
+  name: magento
+  user: magento
+  # password: set via --set or secrets
+  image: mariadb
+  tag: "10.6"
+  storage: 10Gi
+
+# OpenSearch sidecar
+opensearch:
+  enabled: true
+  image: opensearchproject/opensearch
+  tag: "2.19.0"
+  storage: 5Gi
+  javaOpts: "-Xms512m -Xmx512m"
+
+# Persistence
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 20Gi
+
+# Ingress
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  tls:
+    enabled: true
+    secretName: ""
+
+# Git-sync sidecars for live plugin development
+# Each plugin gets its own git-sync container
+gitSync:
+  image: registry.k8s.io/git-sync/git-sync:v4.2.1
+  plugins: []
+  # Example:
+  # plugins:
+  #   - name: my-plugin
+  #     repo: https://github.com/your-org/magento-plugin.git
+  #     branch: main
+  #     path: app/code/YourVendor/Module
+
+# Resources
+resources:
+  magento:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+  database:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  opensearch:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# Health checks
+healthCheck:
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+# Service
+service:
+  type: ClusterIP
+  port: 80
+
+# Pod settings
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

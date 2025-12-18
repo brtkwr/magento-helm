@@ -1,0 +1,167 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "magento.fullname" . }}
+  labels:
+    {{- include "magento.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "magento.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "magento.selectorLabels" . | nindent 8 }}
+    spec:
+      initContainers:
+        - name: init-data
+          image: busybox
+          command: ['sh', '-c', 'mkdir -p /data/mysql /data/opensearch /data/magento && chown -R 1000:1000 /data/opensearch']
+          volumeMounts:
+            - mountPath: /data
+              name: data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "magento.fullname" . }}
+        - name: setup-script
+          configMap:
+            name: {{ include "magento.fullname" . }}-setup
+            defaultMode: 0755
+        {{- range .Values.gitSync.plugins }}
+        - name: git-sync-{{ .name }}
+          emptyDir: {}
+        {{- end }}
+      containers:
+        - name: magento
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: MAGENTO_HOST
+              value: {{ .Values.magento.host | quote }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: database-password
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: admin-password
+          volumeMounts:
+            - mountPath: /var/www/html/var
+              name: data
+              subPath: magento/var
+            - mountPath: /var/www/html/pub/media
+              name: data
+              subPath: magento/media
+            - mountPath: /scripts
+              name: setup-script
+            {{- range .Values.gitSync.plugins }}
+            - mountPath: /var/www/html/git-sync/{{ .name }}
+              name: git-sync-{{ .name }}
+            {{- end }}
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/bash", "-c", "nohup /scripts/setup.sh > /var/www/html/var/log/setup.log 2>&1 &"]
+          startupProbe:
+            httpGet:
+              path: /health_check.php
+              port: http
+            initialDelaySeconds: {{ .Values.healthCheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health_check.php
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            {{- toYaml .Values.resources.magento | nindent 12 }}
+
+        - name: database
+          image: "{{ .Values.database.image }}:{{ .Values.database.tag }}"
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: database-password
+            - name: MYSQL_DATABASE
+              value: {{ .Values.database.name | quote }}
+            - name: MYSQL_USER
+              value: {{ .Values.database.user | quote }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: database-password
+          volumeMounts:
+            - mountPath: /var/lib/mysql
+              name: data
+              subPath: mysql
+          resources:
+            {{- toYaml .Values.resources.database | nindent 12 }}
+
+        {{- if .Values.opensearch.enabled }}
+        - name: opensearch
+          image: "{{ .Values.opensearch.image }}:{{ .Values.opensearch.tag }}"
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: DISABLE_SECURITY_PLUGIN
+              value: "true"
+            - name: OPENSEARCH_JAVA_OPTS
+              value: {{ .Values.opensearch.javaOpts | quote }}
+          volumeMounts:
+            - mountPath: /usr/share/opensearch/data
+              name: data
+              subPath: opensearch
+          resources:
+            {{- toYaml .Values.resources.opensearch | nindent 12 }}
+        {{- end }}
+
+        {{- range .Values.gitSync.plugins }}
+        - name: git-sync-{{ .name }}
+          image: {{ $.Values.gitSync.image }}
+          args:
+            - --repo={{ .repo }}
+            - --ref={{ .branch | default "main" }}
+            - --root=/git
+            - --link=code
+            - --period=60s
+          volumeMounts:
+            - mountPath: /git
+              name: git-sync-{{ .name }}
+          securityContext:
+            runAsUser: 65533
+            runAsGroup: 65533
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

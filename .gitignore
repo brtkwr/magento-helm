@@ -1,0 +1,16 @@
+# Docker secrets
+docker/auth.json
+
+# Helm
+charts/magento/charts/
+*.tgz
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
