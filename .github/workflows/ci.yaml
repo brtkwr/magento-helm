@@ -113,37 +113,67 @@ jobs:
     needs: [lint, docker-lint]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
           version: v3.13.0
 
-      - name: Get version info
+      - name: Calculate next version
         id: version
         run: |
           git fetch --tags
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
-          VERSION=${TAG#v}
-          SHA=$(git rev-parse --short HEAD)
-          echo "base=$VERSION" >> $GITHUB_OUTPUT
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Parse current version
+          VERSION=${LATEST_TAG#v}
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+
+          # Get commits since last tag
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --oneline)
+          else
+            COMMITS=$(git log ${LATEST_TAG}..HEAD --oneline)
+          fi
+
+          # Determine bump type from conventional commits
+          if echo "$COMMITS" | grep -qE "^[a-f0-9]+ feat(\(.+\))?!?:"; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            echo "Bump: minor (feat found)"
+          elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ fix(\(.+\))?:"; then
+            PATCH=$((PATCH + 1))
+            echo "Bump: patch (fix found)"
+          else
+            PATCH=$((PATCH + 1))
+            echo "Bump: patch (default)"
+          fi
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-      - name: Package and push chart (base version)
+      - name: Package and push chart
         run: |
-          sed -i "s/^version:.*/version: ${{ steps.version.outputs.base }}/" charts/magento/Chart.yaml
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" charts/magento/Chart.yaml
           helm package charts/magento
-          helm push magento-${{ steps.version.outputs.base }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
-
-      - name: Package and push chart (SHA version)
-        run: |
-          sed -i "s/^version:.*/version: ${{ steps.version.outputs.base }}-${{ steps.version.outputs.sha }}/" charts/magento/Chart.yaml
-          helm package charts/magento
-          helm push magento-${{ steps.version.outputs.base }}-${{ steps.version.outputs.sha }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+          helm push magento-${{ steps.version.outputs.version }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
