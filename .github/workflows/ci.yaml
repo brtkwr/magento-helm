@@ -88,8 +88,8 @@ jobs:
           file: docker/Dockerfile.base
           push: true
           tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:php8.2
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:php8.2-${{ steps.sha.outputs.short }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:php8.2-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -100,8 +100,8 @@ jobs:
           file: docker/Dockerfile
           push: true
           tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8-${{ steps.sha.outputs.short }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8-latest
           secrets: |
             composer_auth=docker/auth.json
           cache-from: type=gha
@@ -127,15 +127,17 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Update chart version
-        run: |
-          sed -i "s/^version:.*/version: 0.1.0-${{ steps.sha.outputs.short }}/" charts/magento/Chart.yaml
-
-      - name: Package chart
-        run: helm package charts/magento
-
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-      - name: Push chart
-        run: helm push magento-0.1.0-${{ steps.sha.outputs.short }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+      - name: Package and push chart (base version)
+        run: |
+          sed -i "s/^version:.*/version: 0.1.0/" charts/magento/Chart.yaml
+          helm package charts/magento
+          helm push magento-0.1.0.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+
+      - name: Package and push chart (SHA version)
+        run: |
+          sed -i "s/^version:.*/version: 0.1.0-${{ steps.sha.outputs.short }}/" charts/magento/Chart.yaml
+          helm package charts/magento
+          helm push magento-0.1.0-${{ steps.sha.outputs.short }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
