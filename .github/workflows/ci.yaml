@@ -41,3 +41,46 @@ jobs:
         with:
           dockerfile: docker/Dockerfile
           failure-threshold: error
+
+  docker-build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Create auth.json
+        run: |
+          cat > docker/auth.json << EOF
+          {
+            "http-basic": {
+              "repo.magento.com": {
+                "username": "${{ secrets.MAGENTO_PUBLIC_KEY }}",
+                "password": "${{ secrets.MAGENTO_PRIVATE_KEY }}"
+              }
+            }
+          }
+          EOF
+
+      - name: Build base image
+        uses: docker/build-push-action@v5
+        with:
+          context: docker
+          file: docker/Dockerfile.base
+          push: false
+          tags: ghcr.io/${{ github.repository_owner }}/magento-base:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Magento image
+        uses: docker/build-push-action@v5
+        with:
+          context: docker
+          file: docker/Dockerfile
+          push: false
+          tags: ghcr.io/${{ github.repository_owner }}/magento:test
+          secrets: |
+            composer_auth=docker/auth.json
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
