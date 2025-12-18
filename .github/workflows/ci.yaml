@@ -68,9 +68,6 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Create auth.json
-        run: echo '{"http-basic":{"repo.magento.com":{"username":"${{ secrets.MAGENTO_PUBLIC_KEY }}","password":"${{ secrets.MAGENTO_PRIVATE_KEY }}"}}}' > docker/auth.json
-
       - name: Build and push base image
         uses: docker/build-push-action@v5
         with:
@@ -93,7 +90,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8-${{ steps.sha.outputs.short }}
           secrets: |
-            composer_auth=docker/auth.json
+            composer_auth={"http-basic":{"repo.magento.com":{"username":"${{ secrets.MAGENTO_PUBLIC_KEY }}","password":"${{ secrets.MAGENTO_PRIVATE_KEY }}"}}}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
