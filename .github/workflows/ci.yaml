@@ -123,21 +123,27 @@ jobs:
         with:
           version: v3.13.0
 
-      - name: Get short SHA
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Get version info
+        id: version
+        run: |
+          git fetch --tags
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+          VERSION=${TAG#v}
+          SHA=$(git rev-parse --short HEAD)
+          echo "base=$VERSION" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Package and push chart (base version)
         run: |
-          sed -i "s/^version:.*/version: 0.1.0/" charts/magento/Chart.yaml
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.base }}/" charts/magento/Chart.yaml
           helm package charts/magento
-          helm push magento-0.1.0.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+          helm push magento-${{ steps.version.outputs.base }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
 
       - name: Package and push chart (SHA version)
         run: |
-          sed -i "s/^version:.*/version: 0.1.0-${{ steps.sha.outputs.short }}/" charts/magento/Chart.yaml
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.base }}-${{ steps.version.outputs.sha }}/" charts/magento/Chart.yaml
           helm package charts/magento
-          helm push magento-0.1.0-${{ steps.sha.outputs.short }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+          helm push magento-${{ steps.version.outputs.base }}-${{ steps.version.outputs.sha }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
