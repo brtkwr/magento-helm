@@ -50,6 +50,12 @@ data:
       echo "Magento already installed, running upgrade..."
       bin/magento setup:upgrade
       bin/magento setup:di:compile
+      # Build Hyva Tailwind CSS (if Node.js available)
+      if command -v npm &> /dev/null && [ -d vendor/hyva-themes/magento2-default-theme/web/tailwind ]; then
+        bin/magento hyva:config:generate || true
+        npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ ci
+        npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ run build-prod
+      fi
       apachectl -k graceful  # Reload Apache to clear opcache
       {{- if .Values.postCommands }}
       # Run post-setup commands (idempotent)
@@ -106,6 +112,12 @@ data:
 
     bin/magento setup:upgrade
     bin/magento setup:di:compile
+    # Build Hyva Tailwind CSS (if Node.js available)
+    if command -v npm &> /dev/null && [ -d vendor/hyva-themes/magento2-default-theme/web/tailwind ]; then
+      bin/magento hyva:config:generate || true
+      npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ ci
+      npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ run build-prod
+    fi
     apachectl -k graceful  # Reload Apache to clear opcache
     bin/magento catalog:images:resize || true  # Generate product image cache
     bin/magento indexer:reindex
