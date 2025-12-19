@@ -48,8 +48,31 @@ data:
     # Check if Magento is already installed
     if [ -f app/etc/env.php ]; then
       echo "Magento already installed, running upgrade..."
-      bin/magento setup:upgrade
-      bin/magento setup:di:compile
+
+      # Backup env.php before upgrade (can get corrupted on failure)
+      cp app/etc/env.php app/etc/env.php.bak
+
+      bin/magento setup:upgrade || {
+        echo "setup:upgrade failed, restoring env.php backup"
+        cp app/etc/env.php.bak app/etc/env.php
+        exit 1
+      }
+
+      bin/magento setup:di:compile || {
+        echo "setup:di:compile failed, restoring env.php backup"
+        cp app/etc/env.php.bak app/etc/env.php
+        exit 1
+      }
+
+      # Validate env.php has install date (fix if corrupted)
+      php -r "
+        \$c = include 'app/etc/env.php';
+        if (!isset(\$c['install']['date'])) {
+          \$c['install'] = ['date' => date('r')];
+          file_put_contents('app/etc/env.php', '<?php return '.var_export(\$c,true).';');
+          echo \"Fixed missing install date in env.php\n\";
+        }
+      "
       apachectl -k graceful  # Reload Apache to clear opcache
       {{- if .Values.postScript }}
       # Run custom post-setup script
