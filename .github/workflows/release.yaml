@@ -68,17 +68,15 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Create auth.json
+        env:
+          MAGENTO_PUBLIC_KEY: ${{ secrets.MAGENTO_PUBLIC_KEY }}
+          MAGENTO_PRIVATE_KEY: ${{ secrets.MAGENTO_PRIVATE_KEY }}
         run: |
-          cat > docker/auth.json << EOF
-          {
-            "http-basic": {
-              "repo.magento.com": {
-                "username": "${{ secrets.MAGENTO_PUBLIC_KEY }}",
-                "password": "${{ secrets.MAGENTO_PRIVATE_KEY }}"
-              }
-            }
-          }
-          EOF
+          jq -n \
+            --arg pub "$MAGENTO_PUBLIC_KEY" \
+            --arg priv "$MAGENTO_PRIVATE_KEY" \
+            '{"http-basic": {"repo.magento.com": {"username": $pub, "password": $priv}}}' \
+            > docker/auth.json
 
       - name: Build and push Magento image
         uses: docker/build-push-action@v5
