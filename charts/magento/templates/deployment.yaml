@@ -28,6 +28,13 @@ spec:
           volumeMounts:
             - mountPath: /data
               name: data
+        - name: init-etc
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ['sh', '-c', 'if [ ! -f /data/magento/etc/config.php ]; then echo "Copying app/etc from image to PVC..."; cp -a /var/www/html/app/etc/. /data/magento/etc/; else echo "app/etc already exists in PVC"; fi']
+          volumeMounts:
+            - mountPath: /data
+              name: data
       volumes:
         - name: data
           persistentVolumeClaim:
