@@ -129,7 +129,7 @@ data:
     bin/magento setup:di:compile
     apachectl -k graceful  # Reload Apache to clear opcache
     bin/magento catalog:images:resize || true  # Generate product image cache
-    bin/magento indexer:reindex
+    bin/magento indexer:reindex || true
 
     {{- if .Values.postScript }}
     # Run custom post-setup script
