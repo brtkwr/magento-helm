@@ -45,6 +45,11 @@ data:
     echo "OpenSearch is ready"
     {{- end }}
 
+    {{- if or .Values.hooks.preSetup }}
+    # Hook: preSetup
+{{ .Values.hooks.preSetup | indent 4 }}
+    {{- end }}
+
     # Check if Magento is already installed
     if [ -f app/etc/env.php ]; then
       echo "Magento already installed, running upgrade..."
@@ -74,9 +79,28 @@ data:
         }
       "
       apachectl -k graceful  # Reload Apache to clear opcache
+
+      # Sync primary admin user (idempotent)
+      bin/magento admin:user:create \
+        --admin-firstname='{{ .Values.magento.adminFirstname }}' \
+        --admin-lastname='{{ .Values.magento.adminLastname }}' \
+        --admin-email='{{ .Values.magento.adminEmail }}' \
+        --admin-user='{{ .Values.magento.adminUser }}' \
+        --admin-password="${ADMIN_PASSWORD}" || true
+
+      {{- if .Values.hooks.postUpgrade }}
+      # Hook: postUpgrade
+{{ .Values.hooks.postUpgrade | indent 6 }}
+      {{- end }}
+      {{- if or .Values.hooks.postSetup .Values.postScript }}
+      # Hook: postSetup
+      {{- if .Values.hooks.postSetup }}
+{{ .Values.hooks.postSetup | indent 6 }}
+      {{- end }}
       {{- if .Values.postScript }}
-      # Run custom post-setup script
+      # DEPRECATED postScript (use hooks.postSetup)
 {{ .Values.postScript | indent 6 }}
+      {{- end }}
       {{- end }}
       bin/magento cache:flush
       bin/magento maintenance:disable
@@ -131,9 +155,19 @@ data:
     bin/magento catalog:images:resize || true  # Generate product image cache
     bin/magento indexer:reindex || true
 
+    {{- if .Values.hooks.postInstall }}
+    # Hook: postInstall
+{{ .Values.hooks.postInstall | indent 4 }}
+    {{- end }}
+    {{- if or .Values.hooks.postSetup .Values.postScript }}
+    # Hook: postSetup
+    {{- if .Values.hooks.postSetup }}
+{{ .Values.hooks.postSetup | indent 4 }}
+    {{- end }}
     {{- if .Values.postScript }}
-    # Run custom post-setup script
+    # DEPRECATED postScript (use hooks.postSetup)
 {{ .Values.postScript | indent 4 }}
+    {{- end }}
     {{- end }}
 
     bin/magento cache:flush

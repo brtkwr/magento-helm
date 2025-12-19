@@ -18,15 +18,27 @@ magento:
   currency: GBP
   timezone: Europe/London
 
-# Custom shell script (run on every startup, should be idempotent)
-# Use for store creation, config, Tailwind builds, etc.
+# Lifecycle hooks for injecting scripts at different stages
+# All hooks should be idempotent (safe to run multiple times)
+hooks:
+  # Runs before any setup (both upgrade and install paths)
+  preSetup: ""
+  # Runs after setup:upgrade on existing installs only
+  postUpgrade: ""
+  # Runs after setup:install on fresh installs only
+  postInstall: ""
+  # Runs after all setup completes (both paths) - use for config, stores, etc.
+  postSetup: ""
+  # Example:
+  # hooks:
+  #   postUpgrade: |
+  #     bin/magento admin:user:create --admin-user=admin ... || true
+  #   postSetup: |
+  #     bin/magento store:create 'Hyva Checkout' hyva || true
+  #     bin/magento config:set payment/two_payment/active 1 || true
+
+# DEPRECATED: Use hooks.postSetup instead
 postScript: ""
-# Example:
-# postScript: |
-#   bin/magento store:create 'Hyva Checkout' hyva || true
-#   bin/magento config:set --scope=stores --scope-code=hyva design/theme/theme_id 5
-#   npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ ci
-#   npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ run build-prod
 
 # Database (MariaDB sidecar)
 database:
