@@ -89,6 +89,9 @@ data:
     # SSL offloader config (Magento behind load balancer)
     bin/magento config:set web/secure/offloader_header X-Forwarded-Proto
 
+    # Enable store codes in URLs (for multi-store setups with /store-code/ URLs)
+    bin/magento config:set web/url/use_store 1
+
     bin/magento setup:upgrade
     bin/magento setup:di:compile
     apachectl -k graceful  # Reload Apache to clear opcache
