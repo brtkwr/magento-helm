@@ -17,9 +17,7 @@ spec:
   tls:
     - hosts:
         - {{ .Values.magento.host | quote }}
-      {{- if .Values.ingress.tls.secretName }}
-      secretName: {{ .Values.ingress.tls.secretName }}
-      {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" (include "magento.fullname" .)) }}
   {{- end }}
   rules:
     - host: {{ .Values.magento.host | quote }}

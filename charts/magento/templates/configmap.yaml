@@ -51,6 +51,12 @@ data:
       bin/magento setup:upgrade
       bin/magento setup:di:compile
       apachectl -k graceful  # Reload Apache to clear opcache
+      {{- if .Values.postCommands }}
+      # Run post-setup commands (idempotent)
+      {{- range .Values.postCommands }}
+      bin/magento {{ . }} || true
+      {{- end }}
+      {{- end }}
       bin/magento cache:flush
       bin/magento maintenance:disable
       chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
@@ -103,6 +109,14 @@ data:
     apachectl -k graceful  # Reload Apache to clear opcache
     bin/magento catalog:images:resize || true  # Generate product image cache
     bin/magento indexer:reindex
+
+    {{- if .Values.postCommands }}
+    # Run post-setup commands (idempotent)
+    {{- range .Values.postCommands }}
+    bin/magento {{ . }} || true
+    {{- end }}
+    {{- end }}
+
     bin/magento cache:flush
     bin/magento maintenance:disable
     chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
