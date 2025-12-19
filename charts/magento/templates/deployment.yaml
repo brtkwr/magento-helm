@@ -24,7 +24,7 @@ spec:
       initContainers:
         - name: init-data
           image: busybox
-          command: ['sh', '-c', 'mkdir -p /data/mysql /data/opensearch /data/magento/var/log /data/magento/media && chown -R 1000:1000 /data/opensearch']
+          command: ['sh', '-c', 'mkdir -p /data/mysql /data/opensearch /data/magento/var/log /data/magento/media /data/magento/etc && chown -R 1000:1000 /data/opensearch']
           volumeMounts:
             - mountPath: /data
               name: data
@@ -67,6 +67,9 @@ spec:
             - mountPath: /var/www/html/pub/media
               name: data
               subPath: magento/media
+            - mountPath: /var/www/html/app/etc
+              name: data
+              subPath: magento/etc
             - mountPath: /scripts
               name: setup-script
             {{- range .Values.gitSync.plugins }}
