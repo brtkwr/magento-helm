@@ -204,6 +204,40 @@ After deployment:
 
 Default admin credentials are set via `magento.adminUser` and `magento.adminPassword`.
 
+## Persistence & Restarts
+
+The chart persists data across pod restarts using a PVC with the following mounts:
+
+| Mount Path | PVC Subpath | Purpose |
+|------------|-------------|---------|
+| `/var/www/html/var` | `magento/var` | Logs, cache, sessions |
+| `/var/www/html/pub/media` | `magento/media` | Uploaded media files |
+| `/var/www/html/app/etc` | `magento/etc` | `env.php`, `config.php` |
+
+### How Restarts Work
+
+1. **`init-etc` container** - On first boot, copies default `app/etc` from the Docker image to the PVC. On subsequent boots, preserves existing files (including `env.php`).
+
+2. **Setup script** - Detects if Magento is already installed by checking for `app/etc/env.php`:
+   - **If exists**: Runs `setup:upgrade` + `di:compile` (fast upgrade path)
+   - **If missing**: Runs full `setup:install` (initial installation)
+
+3. **postScript** - Custom commands run after setup (configure stores, rebuild CSS, etc.)
+
+This ensures pod restarts are **idempotent** - they complete without manual intervention.
+
+### Custom Post-Setup Commands
+
+Use `postScript` for commands that should run after every restart:
+
+```yaml
+postScript: |
+  bin/magento config:set payment/my_method/active 1 || true
+  bin/magento cache:flush
+```
+
+Use `|| true` for commands that may fail during initial setup (e.g., config paths that don't exist yet).
+
 ## Troubleshooting
 
 ### Check setup logs
