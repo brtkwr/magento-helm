@@ -64,6 +64,12 @@ ingress:
 # Each plugin gets its own git-sync container
 gitSync:
   image: registry.k8s.io/git-sync/git-sync:v4.2.1
+  # Credentials for private repos (optional)
+  # Creates a secret with GitHub token for git-sync to use
+  credentials:
+    # GitHub personal access token (PAT) with repo read access
+    # Can be set via --set gitSync.credentials.token=ghp_xxx
+    token: ""
   plugins: []
   # Example:
   # plugins:
@@ -71,6 +77,7 @@ gitSync:
   #     repo: https://github.com/your-org/magento-plugin.git
   #     branch: main
   #     path: app/code/YourVendor/Module
+  #     private: false  # set to true for private repos (uses credentials.token)
 
 # Resources
 resources:

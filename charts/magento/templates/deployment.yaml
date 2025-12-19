@@ -155,6 +155,16 @@ spec:
             - --root=/git
             - --link=code
             - --period=60s
+          {{- if and .private $.Values.gitSync.credentials.token }}
+          env:
+            - name: GITSYNC_USERNAME
+              value: x-access-token
+            - name: GITSYNC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" $ }}
+                  key: git-token
+          {{- end }}
           volumeMounts:
             - mountPath: /git
               name: git-sync-{{ .name }}
