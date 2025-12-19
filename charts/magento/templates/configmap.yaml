@@ -51,11 +51,9 @@ data:
       bin/magento setup:upgrade
       bin/magento setup:di:compile
       apachectl -k graceful  # Reload Apache to clear opcache
-      {{- if .Values.postCommands }}
-      # Run post-setup commands (idempotent)
-      {{- range .Values.postCommands }}
-      bin/magento {{ . }} || true
-      {{- end }}
+      {{- if .Values.postScript }}
+      # Run custom post-setup script
+{{ .Values.postScript | indent 6 }}
       {{- end }}
       bin/magento cache:flush
       bin/magento maintenance:disable
@@ -110,11 +108,9 @@ data:
     bin/magento catalog:images:resize || true  # Generate product image cache
     bin/magento indexer:reindex
 
-    {{- if .Values.postCommands }}
-    # Run post-setup commands (idempotent)
-    {{- range .Values.postCommands }}
-    bin/magento {{ . }} || true
-    {{- end }}
+    {{- if .Values.postScript }}
+    # Run custom post-setup script
+{{ .Values.postScript | indent 4 }}
     {{- end }}
 
     bin/magento cache:flush

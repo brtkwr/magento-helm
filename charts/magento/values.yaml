@@ -18,15 +18,15 @@ magento:
   currency: GBP
   timezone: Europe/London
 
-# Post-setup commands (run on every startup, idempotent)
-# Each entry runs: bin/magento [command] || true
-postCommands: []
+# Custom shell script (run on every startup, should be idempotent)
+# Use for store creation, config, Tailwind builds, etc.
+postScript: ""
 # Example:
-# postCommands:
-#   - "store:create 'Hyva Checkout' hyva"
-#   - "store:create 'Amasty Checkout' amasty"
-#   - "config:set --scope=stores --scope-code=hyva design/theme/theme_id 5"
-#   - "config:set --scope=stores --scope-code=amasty amasty_checkout/general/enabled 1"
+# postScript: |
+#   bin/magento store:create 'Hyva Checkout' hyva || true
+#   bin/magento config:set --scope=stores --scope-code=hyva design/theme/theme_id 5
+#   npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ ci
+#   npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ run build-prod
 
 # Database (MariaDB sidecar)
 database:
