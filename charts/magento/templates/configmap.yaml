@@ -49,6 +49,8 @@ data:
     if [ -f app/etc/env.php ]; then
       echo "Magento already installed, running upgrade..."
       bin/magento setup:upgrade
+      bin/magento setup:di:compile
+      apachectl -k graceful  # Reload Apache to clear opcache
       bin/magento cache:flush
       bin/magento maintenance:disable
       chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
@@ -83,7 +85,13 @@ data:
     bin/magento module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true
 
     bin/magento deploy:mode:set developer
+
+    # SSL offloader config (Magento behind load balancer)
+    bin/magento config:set web/secure/offloader_header X-Forwarded-Proto
+
     bin/magento setup:upgrade
+    bin/magento setup:di:compile
+    apachectl -k graceful  # Reload Apache to clear opcache
     bin/magento indexer:reindex
     bin/magento cache:flush
     bin/magento maintenance:disable
