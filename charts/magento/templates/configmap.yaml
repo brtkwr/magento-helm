@@ -92,9 +92,16 @@ data:
     # Enable store codes in URLs (for multi-store setups with /store-code/ URLs)
     bin/magento config:set web/url/use_store 1
 
+    # Copy sample data media files if present
+    if [ -d /var/www/html/vendor/magento/sample-data-media/catalog ]; then
+      cp -r /var/www/html/vendor/magento/sample-data-media/* /var/www/html/pub/media/
+      echo "Sample data media files copied"
+    fi
+
     bin/magento setup:upgrade
     bin/magento setup:di:compile
     apachectl -k graceful  # Reload Apache to clear opcache
+    bin/magento catalog:images:resize || true  # Generate product image cache
     bin/magento indexer:reindex
     bin/magento cache:flush
     bin/magento maintenance:disable
