@@ -13,22 +13,13 @@ data:
 
     {{- if .Values.gitSync.plugins }}
     # Wait for git-sync to populate the repos
-    echo "Waiting for git-sync..."
+    echo "Git-sync init containers completed. Verifying mounts..."
     {{- range .Values.gitSync.plugins }}
-    echo "Waiting for plugin: {{ .name }}..."
-    TIMEOUT=60
-    while [ ! -L /var/www/html/git-sync/{{ .name }}/code ]; do
-      if [ $TIMEOUT -le 0 ]; then
-        echo "Error: git-sync for {{ .name }} timed out after 60s!"
-        # Proceeding anyway to avoid crash loop, but logging error
-        break
-      fi
-      echo "Waiting for {{ .name }}... ($TIMEOUT)"
-      sleep 2
-      TIMEOUT=$((TIMEOUT-2))
-    done
+    if [ ! -d /var/www/html/git-sync/{{ .name }}/code ]; then
+      echo "Warning: git-sync directory /var/www/html/git-sync/{{ .name }}/code not found!"
+    fi
     {{- end }}
-    echo "Git-sync ready (or timed out)"
+    echo "Git-sync check complete"
 
     # Create symlinks for plugins
     {{- range .Values.gitSync.plugins }}

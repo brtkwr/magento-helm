@@ -35,6 +35,38 @@ spec:
           volumeMounts:
             - mountPath: /data
               name: data
+
+        {{- range .Values.gitSync.plugins }}
+        - name: init-git-sync-{{ .name }}
+          image: {{ $.Values.gitSync.image }}
+          args:
+            - --repo={{ .repo }}
+            - --ref={{ .branch | default "main" }}
+            - --root=/git
+            - --link=code
+            - --one-time
+          {{- if or $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
+          env:
+            - name: GITSYNC_USERNAME
+              value: x-access-token
+            - name: GITSYNC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if $.Values.gitSync.credentials.existingSecret }}
+                  name: {{ $.Values.gitSync.credentials.existingSecret }}
+                  key: {{ $.Values.gitSync.credentials.existingSecretKey | default "token" }}
+                  {{- else }}
+                  name: {{ include "magento.fullname" $ }}
+                  key: git-token
+                  {{- end }}
+          {{- end }}
+          volumeMounts:
+            - mountPath: /git
+              name: git-sync-{{ .name }}
+          securityContext:
+            runAsUser: 65533
+            runAsGroup: 65533
+        {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
