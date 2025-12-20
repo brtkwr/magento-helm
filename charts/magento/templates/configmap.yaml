@@ -80,13 +80,15 @@ data:
       "
       apachectl -k graceful  # Reload Apache to clear opcache
 
-      # Sync primary admin user (idempotent)
+      # Sync all admin users (idempotent - creates or updates)
+      {{- range $i, $user := .Values.adminUsers }}
       bin/magento admin:user:create \
-        --admin-firstname='{{ .Values.magento.adminFirstname }}' \
-        --admin-lastname='{{ .Values.magento.adminLastname }}' \
-        --admin-email='{{ .Values.magento.adminEmail }}' \
-        --admin-user='{{ .Values.magento.adminUser }}' \
-        --admin-password="${ADMIN_PASSWORD}" || true
+        --admin-firstname='{{ $user.firstname }}' \
+        --admin-lastname='{{ $user.lastname }}' \
+        --admin-email='{{ $user.email }}' \
+        --admin-user='{{ $user.username }}' \
+        --admin-password="${ADMIN_PASSWORD_{{ $i }}}" || true
+      {{- end }}
 
       {{- if .Values.hooks.postUpgrade }}
       # Hook: postUpgrade
@@ -102,13 +104,21 @@ data:
 {{ .Values.postScript | indent 6 }}
       {{- end }}
       {{- end }}
+
+      # Reindex after changes
+      bin/magento indexer:reindex || true
+
+      # Ensure config is synchronized after hooks
+      bin/magento app:config:import --no-interaction || true
+
       bin/magento cache:flush
       bin/magento maintenance:disable
       chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
       exit 0
     fi
 
-    # Initial setup
+    # Initial setup (uses first admin user as primary)
+    {{- $primaryUser := index .Values.adminUsers 0 }}
     bin/magento setup:install \
       --base-url="https://{{ .Values.magento.host }}/" \
       --base-url-secure="https://{{ .Values.magento.host }}/" \
@@ -116,11 +126,11 @@ data:
       --db-name='{{ .Values.database.name }}' \
       --db-user='{{ .Values.database.user }}' \
       --db-password="${MYSQL_PASSWORD}" \
-      --admin-firstname='{{ .Values.magento.adminFirstname }}' \
-      --admin-lastname='{{ .Values.magento.adminLastname }}' \
-      --admin-email='{{ .Values.magento.adminEmail }}' \
-      --admin-user='{{ .Values.magento.adminUser }}' \
-      --admin-password="${ADMIN_PASSWORD}" \
+      --admin-firstname='{{ $primaryUser.firstname }}' \
+      --admin-lastname='{{ $primaryUser.lastname }}' \
+      --admin-email='{{ $primaryUser.email }}' \
+      --admin-user='{{ $primaryUser.username }}' \
+      --admin-password="${ADMIN_PASSWORD_0}" \
       --language='{{ .Values.magento.language }}' \
       --currency='{{ .Values.magento.currency }}' \
       --timezone='{{ .Values.magento.timezone }}' \
@@ -155,6 +165,18 @@ data:
     bin/magento catalog:images:resize || true  # Generate product image cache
     bin/magento indexer:reindex || true
 
+    # Create additional admin users (skip first, already created by setup:install)
+    {{- range $i, $user := .Values.adminUsers }}
+    {{- if gt $i 0 }}
+    bin/magento admin:user:create \
+      --admin-firstname='{{ $user.firstname }}' \
+      --admin-lastname='{{ $user.lastname }}' \
+      --admin-email='{{ $user.email }}' \
+      --admin-user='{{ $user.username }}' \
+      --admin-password="${ADMIN_PASSWORD_{{ $i }}}" || true
+    {{- end }}
+    {{- end }}
+
     {{- if .Values.hooks.postInstall }}
     # Hook: postInstall
 {{ .Values.hooks.postInstall | indent 4 }}
@@ -169,6 +191,9 @@ data:
 {{ .Values.postScript | indent 4 }}
     {{- end }}
     {{- end }}
+
+    # Ensure config is synchronized after hooks
+    bin/magento app:config:import --no-interaction || true
 
     bin/magento cache:flush
     bin/magento maintenance:disable

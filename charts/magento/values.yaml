@@ -9,14 +9,31 @@ image:
 # Magento configuration
 magento:
   host: magento.example.com
-  adminFirstname: Admin
-  adminLastname: User
-  adminEmail: admin@example.com
-  adminUser: admin
-  # adminPassword: set via --set or secrets
   language: en_GB
   currency: GBP
   timezone: Europe/London
+
+# Admin users - first user is primary (used for setup:install)
+# All users are synced on every pod restart (idempotent)
+# Note: Roles must be assigned via admin panel - CLI doesn't support role assignment
+adminUsers:
+  - username: admin
+    email: admin@example.com
+    firstname: Admin
+    lastname: User
+    password: ""  # Set via --set adminUsers[0].password=xxx
+# Example:
+# adminUsers:
+#   - username: brtkwr
+#     email: bkunwar@two.inc
+#     firstname: Bharat
+#     lastname: Kunwar
+#     password: mypassword123
+#   - username: shabib
+#     email: shabib@two.inc
+#     firstname: Salman
+#     lastname: Habib
+#     password: anotherpassword456
 
 # Lifecycle hooks for injecting scripts at different stages
 # All hooks should be idempotent (safe to run multiple times)
