@@ -164,8 +164,13 @@ spec:
             - name: GITSYNC_PASSWORD
               valueFrom:
                 secretKeyRef:
+                  {{- if $.Values.gitSync.credentials.existingSecret }}
+                  name: {{ $.Values.gitSync.credentials.existingSecret }}
+                  key: {{ $.Values.gitSync.credentials.existingSecretKey | default "token" }}
+                  {{- else }}
                   name: {{ include "magento.fullname" $ }}
                   key: git-token
+                  {{- end }}
           {{- end }}
           volumeMounts:
             - mountPath: /git
