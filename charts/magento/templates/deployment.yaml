@@ -157,7 +157,7 @@ spec:
             - --root=/git
             - --link=code
             - --period=60s
-          {{- if and .private $.Values.gitSync.credentials.token }}
+          {{- if and .private (or $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret) }}
           env:
             - name: GITSYNC_USERNAME
               value: x-access-token
