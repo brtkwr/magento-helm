@@ -15,11 +15,20 @@ data:
     # Wait for git-sync to populate the repos
     echo "Waiting for git-sync..."
     {{- range .Values.gitSync.plugins }}
+    echo "Waiting for plugin: {{ .name }}..."
+    TIMEOUT=60
     while [ ! -L /var/www/html/git-sync/{{ .name }}/code ]; do
+      if [ $TIMEOUT -le 0 ]; then
+        echo "Error: git-sync for {{ .name }} timed out after 60s!"
+        # Proceeding anyway to avoid crash loop, but logging error
+        break
+      fi
+      echo "Waiting for {{ .name }}... ($TIMEOUT)"
       sleep 2
+      TIMEOUT=$((TIMEOUT-2))
     done
     {{- end }}
-    echo "Git-sync ready"
+    echo "Git-sync ready (or timed out)"
 
     # Create symlinks for plugins
     {{- range .Values.gitSync.plugins }}
