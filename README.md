@@ -15,7 +15,7 @@ Deploy Magento 2.4.8 on Kubernetes with git-sync support for live plugin develop
 # Using OCI registry
 helm install magento oci://ghcr.io/brtkwr/charts/magento \
   --set magento.host=magento.example.com \
-  --set magento.adminPassword=YourSecurePassword123 \
+  --set adminUsers[0].password=YourSecurePassword123 \
   --set database.password=YourDBPassword123
 
 # Or clone locally
@@ -23,7 +23,7 @@ git clone https://github.com/brtkwr/magento-helm.git
 cd magento-helm
 helm install magento ./charts/magento \
   --set magento.host=magento.example.com \
-  --set magento.adminPassword=YourSecurePassword123 \
+  --set adminUsers[0].password=YourSecurePassword123 \
   --set database.password=YourDBPassword123
 ```
 
@@ -43,12 +43,31 @@ See [values.yaml](charts/magento/values.yaml) for all options.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `magento.host` | Store URL hostname | `magento.example.com` |
-| `magento.adminUser` | Admin username | `admin` |
-| `magento.adminPassword` | Admin password | (generated) |
 | `magento.currency` | Store currency | `GBP` |
 | `magento.language` | Store language | `en_GB` |
+| `adminUsers` | Array of admin users | (see below) |
 | `database.password` | MariaDB password | (generated) |
 | `gitSync.plugins` | Array of git repos to sync | `[]` |
+
+### Admin Users
+
+The first user in the array is the primary admin (used for `setup:install`). All users are synced on every pod restart.
+
+```yaml
+adminUsers:
+  - username: admin
+    email: admin@example.com
+    firstname: Admin
+    lastname: User
+    password: securepassword123
+  - username: developer
+    email: dev@example.com
+    firstname: Dev
+    lastname: User
+    password: anotherpassword456
+```
+
+**Note:** Roles must be assigned via the Magento admin panel - the CLI doesn't support role assignment.
 
 ### Production Example
 
@@ -56,9 +75,15 @@ See [values.yaml](charts/magento/values.yaml) for all options.
 # values-production.yaml
 magento:
   host: shop.example.com
-  adminEmail: admin@example.com
   currency: USD
   timezone: America/New_York
+
+adminUsers:
+  - username: admin
+    email: admin@example.com
+    firstname: Admin
+    lastname: User
+    password: ""  # Set via --set
 
 ingress:
   enabled: true
@@ -81,7 +106,7 @@ resources:
 ```bash
 helm install magento oci://ghcr.io/brtkwr/charts/magento \
   -f values-production.yaml \
-  --set magento.adminPassword=$ADMIN_PASSWORD \
+  --set adminUsers[0].password=$ADMIN_PASSWORD \
   --set database.password=$DB_PASSWORD
 ```
 
@@ -202,7 +227,7 @@ After deployment:
 | `https://your-host/admin` | Admin Panel |
 | `https://your-host/health_check.php` | Health Check |
 
-Default admin credentials are set via `magento.adminUser` and `magento.adminPassword`.
+Default admin credentials are set via `adminUsers[0].username` and `adminUsers[0].password`.
 
 ## Persistence & Restarts
 
@@ -222,18 +247,50 @@ The chart persists data across pod restarts using a PVC with the following mount
    - **If exists**: Runs `setup:upgrade` + `di:compile` (fast upgrade path)
    - **If missing**: Runs full `setup:install` (initial installation)
 
-3. **postScript** - Custom commands run after setup (configure stores, rebuild CSS, etc.)
+3. **Lifecycle hooks** - Custom commands run at various stages (configure stores, rebuild CSS, etc.)
 
 This ensures pod restarts are **idempotent** - they complete without manual intervention.
 
-### Custom Post-Setup Commands
+### Lifecycle Hooks
 
-Use `postScript` for commands that should run after every restart:
+The chart provides hooks to inject custom scripts at different stages:
+
+| Hook | When it runs |
+|------|-------------|
+| `hooks.preSetup` | Before any setup (both upgrade and install paths) |
+| `hooks.postUpgrade` | After `setup:upgrade` on existing installs only |
+| `hooks.postInstall` | After `setup:install` on fresh installs only |
+| `hooks.postSetup` | After all setup completes (both paths) |
+
+**Lifecycle flow:**
+
+```
+Fresh install:          Existing install:
+─────────────           ─────────────────
+preSetup                preSetup
+    ↓                       ↓
+setup:install           setup:upgrade
+    ↓                       ↓
+postInstall             postUpgrade
+    ↓                       ↓
+postSetup               postSetup
+```
+
+**Example:**
 
 ```yaml
-postScript: |
-  bin/magento config:set payment/my_method/active 1 || true
-  bin/magento cache:flush
+hooks:
+  postSetup: |
+    # Create store views
+    bin/magento store:create 'Hyva Checkout' hyva || true
+
+    # Configure payment gateway
+    bin/magento config:set payment/my_method/active 1 || true
+
+    # Rebuild CSS
+    npm --prefix vendor/hyva-themes/magento2-default-theme/web/tailwind/ run build-prod
+
+    bin/magento cache:flush
 ```
 
 Use `|| true` for commands that may fail during initial setup (e.g., config paths that don't exist yet).

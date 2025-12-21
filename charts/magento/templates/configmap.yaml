@@ -113,7 +113,7 @@ data:
 
       bin/magento cache:flush
       bin/magento maintenance:disable
-      chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
+      chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static /var/www/html/pub/media
       exit 0
     fi
 
@@ -197,6 +197,6 @@ data:
 
     bin/magento cache:flush
     bin/magento maintenance:disable
-    chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static
+    chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub/static /var/www/html/pub/media
 
     echo "Setup complete!"
