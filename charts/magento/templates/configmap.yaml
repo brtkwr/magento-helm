@@ -63,6 +63,9 @@ data:
         exit 1
       }
 
+      # Clean generated code to prevent rmdir errors during compilation
+      rm -rf generated/code generated/metadata
+
       bin/magento setup:di:compile || {
         echo "setup:di:compile failed, restoring env.php backup"
         cp app/etc/env.php.bak app/etc/env.php
