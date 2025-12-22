@@ -84,6 +84,9 @@ jobs:
           context: docker
           file: docker/Dockerfile
           push: true
+          build-args: |
+            MAGENTO_VERSION=2.4.6
+            PHP_VERSION=8.2
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:${{ steps.version.outputs.version }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.6

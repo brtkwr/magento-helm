@@ -1,12 +1,15 @@
 # syntax=docker/dockerfile:1
-# Magento 2.4.6-p13 with Sample Data
-# Build: docker buildx build --secret id=composer_auth,src=auth.json -t ghcr.io/brtkwr/magento:2.4.6 --push .
-FROM ghcr.io/brtkwr/magento-base:php8.2
+# Magento with Sample Data
+# Build: docker buildx build --build-arg MAGENTO_VERSION=2.4.6 --build-arg PHP_VERSION=8.2 --secret id=composer_auth,src=auth.json -t ghcr.io/brtkwr/magento:2.4.6 --push .
+ARG PHP_VERSION=8.2
+FROM ghcr.io/brtkwr/magento-base:php${PHP_VERSION}
+
+ARG MAGENTO_VERSION=2.4.6
 
 WORKDIR /var/www/html
 
-# Copy composer files
-COPY composer.json ./
+# Copy version-specific composer file
+COPY composer-${MAGENTO_VERSION}.json composer.json
 
 # Install Magento and sample data
 # Requires auth.json with Magento repo credentials
