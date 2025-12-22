@@ -206,19 +206,25 @@ data:
       rm -f /var/www/html/var/.fresh-install
     fi
 
+    {{- if or .Values.hooks.postInstall .Values.hooks.postUpgrade }}
     if [ "$INSTALL_TYPE" = "install" ]; then
       {{- if .Values.hooks.postInstall }}
       # Hook: postInstall
       echo "Running postInstall hook..."
 {{ .Values.hooks.postInstall | indent 6 }}
+      {{- else }}
+      :  # no-op
       {{- end }}
     else
       {{- if .Values.hooks.postUpgrade }}
       # Hook: postUpgrade
       echo "Running postUpgrade hook..."
 {{ .Values.hooks.postUpgrade | indent 6 }}
+      {{- else }}
+      :  # no-op
       {{- end }}
     fi
+    {{- end }}
 
     {{- if or .Values.hooks.postSetup .Values.postScript }}
     # Hook: postSetup
