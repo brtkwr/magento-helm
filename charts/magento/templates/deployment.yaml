@@ -21,12 +21,28 @@ spec:
       labels:
         {{- include "magento.selectorLabels" . | nindent 8 }}
     spec:
-      terminationGracePeriodSeconds: 600
+      terminationGracePeriodSeconds: 120
       initContainers:
-        # Phase 1: Data directory setup
-        - name: init-data
-          image: busybox
-          command: ['sh', '-c', 'mkdir -p /data/mysql /data/opensearch /data/magento/var/log /data/magento/media /data/magento/etc && chown -R 1000:1000 /data/opensearch && chown -R 33:33 /data/magento']
+        # Phase 1: Directory setup + app/etc copy
+        - name: init
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # Create directories
+              mkdir -p /data/mysql /data/opensearch /data/magento/var/log /data/magento/media /data/magento/etc
+              chown -R 1000:1000 /data/opensearch
+              chown -R 33:33 /data/magento
+
+              # Copy app/etc if not exists
+              if [ ! -f /data/magento/etc/config.php ]; then
+                echo "Copying app/etc from image to PVC..."
+                cp -a /var/www/html/app/etc/. /data/magento/etc/
+              else
+                echo "app/etc already exists in PVC"
+              fi
           volumeMounts:
             - mountPath: /data
               name: data
@@ -77,16 +93,7 @@ spec:
             {{- toYaml .Values.resources.opensearch | nindent 12 }}
         {{- end }}
 
-        # Phase 3: Copy app/etc from image if not exists
-        - name: init-etc
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ['sh', '-c', 'if [ ! -f /data/magento/etc/config.php ]; then echo "Copying app/etc from image to PVC..."; cp -a /var/www/html/app/etc/. /data/magento/etc/; else echo "app/etc already exists in PVC"; fi']
-          volumeMounts:
-            - mountPath: /data
-              name: data
-
-        # Phase 4: Git-sync init containers
+        # Phase 3: Git-sync init containers
         {{- range .Values.gitSync.plugins }}
         - name: init-git-sync-{{ .name }}
           image: {{ $.Values.gitSync.image }}
@@ -119,7 +126,7 @@ spec:
             runAsGroup: 65533
         {{- end }}
 
-        # Phase 5: Magento setup (runs after DB/OpenSearch sidecars are ready)
+        # Phase 4: Magento setup (DB/OpenSearch sidecars are now running)
         - name: init-setup
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -168,6 +175,7 @@ spec:
         - name: git-sync-{{ .name }}
           emptyDir: {}
         {{- end }}
+
       containers:
         - name: magento
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -209,7 +217,8 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/bash", "-c", "nohup /scripts/setup.sh > /var/www/html/var/log/setup.log 2>&1 &"]
+                # Lightweight hooks only - main setup done in init-setup
+                command: ["/bin/bash", "/scripts/setup.sh"]
           startupProbe:
             httpGet:
               path: /health_check.php
@@ -226,8 +235,6 @@ spec:
             timeoutSeconds: 10
           resources:
             {{- toYaml .Values.resources.magento | nindent 12 }}
-
-        # Database and OpenSearch are now native sidecars (see initContainers above)
 
         {{- range .Values.gitSync.plugins }}
         - name: git-sync-{{ .name }}
