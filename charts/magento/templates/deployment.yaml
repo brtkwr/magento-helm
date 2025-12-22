@@ -217,8 +217,8 @@ spec:
           lifecycle:
             postStart:
               exec:
-                # Lightweight hooks only - main setup done in init-setup
-                command: ["/bin/bash", "/scripts/setup.sh"]
+                # Run hooks async to avoid timeout - logs to /var/www/html/var/log/setup.log
+                command: ["/bin/bash", "-c", "nohup /scripts/setup.sh > /var/www/html/var/log/setup.log 2>&1 &"]
           startupProbe:
             httpGet:
               path: /health_check.php
