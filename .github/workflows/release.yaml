@@ -86,7 +86,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.6
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:latest
           secrets: |
             composer_auth=docker/auth.json

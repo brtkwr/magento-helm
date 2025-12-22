@@ -87,8 +87,8 @@ jobs:
           file: docker/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.8-${{ steps.sha.outputs.short }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.6
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:2.4.6-${{ steps.sha.outputs.short }}
           secrets: |
             composer_auth={"http-basic":{"repo.magento.com":{"username":"${{ secrets.MAGENTO_PUBLIC_KEY }}","password":"${{ secrets.MAGENTO_PRIVATE_KEY }}"}}}
           cache-from: type=gha

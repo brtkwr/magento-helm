@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Magento 2.4.8 with Sample Data
-# Build: docker buildx build --secret id=composer_auth,src=auth.json -t ghcr.io/brtkwr/magento:2.4.8 --push .
+# Magento 2.4.6-p13 with Sample Data
+# Build: docker buildx build --secret id=composer_auth,src=auth.json -t ghcr.io/brtkwr/magento:2.4.6 --push .
 FROM ghcr.io/brtkwr/magento-base:php8.2
 
 WORKDIR /var/www/html
