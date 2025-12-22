@@ -21,13 +21,63 @@ spec:
       labels:
         {{- include "magento.selectorLabels" . | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: 600
       initContainers:
+        # Phase 1: Data directory setup
         - name: init-data
           image: busybox
           command: ['sh', '-c', 'mkdir -p /data/mysql /data/opensearch /data/magento/var/log /data/magento/media /data/magento/etc && chown -R 1000:1000 /data/opensearch && chown -R 33:33 /data/magento']
           volumeMounts:
             - mountPath: /data
               name: data
+
+        # Phase 2: Native sidecar - Database (K8s 1.28+)
+        - name: database
+          restartPolicy: Always
+          image: "{{ .Values.database.image }}:{{ .Values.database.tag }}"
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: database-password
+            - name: MYSQL_DATABASE
+              value: {{ .Values.database.name | quote }}
+            - name: MYSQL_USER
+              value: {{ .Values.database.user | quote }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: database-password
+          volumeMounts:
+            - mountPath: /var/lib/mysql
+              name: data
+              subPath: mysql
+          resources:
+            {{- toYaml .Values.resources.database | nindent 12 }}
+
+        {{- if .Values.opensearch.enabled }}
+        # Phase 2: Native sidecar - OpenSearch (K8s 1.28+)
+        - name: opensearch
+          restartPolicy: Always
+          image: "{{ .Values.opensearch.image }}:{{ .Values.opensearch.tag }}"
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: DISABLE_SECURITY_PLUGIN
+              value: "true"
+            - name: OPENSEARCH_JAVA_OPTS
+              value: {{ .Values.opensearch.javaOpts | quote }}
+          volumeMounts:
+            - mountPath: /usr/share/opensearch/data
+              name: data
+              subPath: opensearch
+          resources:
+            {{- toYaml .Values.resources.opensearch | nindent 12 }}
+        {{- end }}
+
+        # Phase 3: Copy app/etc from image if not exists
         - name: init-etc
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -36,6 +86,7 @@ spec:
             - mountPath: /data
               name: data
 
+        # Phase 4: Git-sync init containers
         {{- range .Values.gitSync.plugins }}
         - name: init-git-sync-{{ .name }}
           image: {{ $.Values.gitSync.image }}
@@ -67,6 +118,44 @@ spec:
             runAsUser: 65533
             runAsGroup: 65533
         {{- end }}
+
+        # Phase 5: Magento setup (runs after DB/OpenSearch sidecars are ready)
+        - name: init-setup
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "/scripts/init-setup.sh"]
+          env:
+            - name: MAGENTO_HOST
+              value: {{ .Values.magento.host | quote }}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" . }}
+                  key: database-password
+            {{- range $i, $user := .Values.adminUsers }}
+            - name: ADMIN_PASSWORD_{{ $i }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magento.fullname" $ }}
+                  key: admin-password-{{ $i }}
+            {{- end }}
+          volumeMounts:
+            - mountPath: /var/www/html/var
+              name: data
+              subPath: magento/var
+            - mountPath: /var/www/html/pub/media
+              name: data
+              subPath: magento/media
+            - mountPath: /var/www/html/app/etc
+              name: data
+              subPath: magento/etc
+            - mountPath: /scripts
+              name: setup-script
+            {{- range .Values.gitSync.plugins }}
+            - mountPath: /var/www/html/git-sync/{{ .name }}
+              name: git-sync-{{ .name }}
+            {{- end }}
+
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -138,47 +227,7 @@ spec:
           resources:
             {{- toYaml .Values.resources.magento | nindent 12 }}
 
-        - name: database
-          image: "{{ .Values.database.image }}:{{ .Values.database.tag }}"
-          env:
-            - name: MYSQL_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "magento.fullname" . }}
-                  key: database-password
-            - name: MYSQL_DATABASE
-              value: {{ .Values.database.name | quote }}
-            - name: MYSQL_USER
-              value: {{ .Values.database.user | quote }}
-            - name: MYSQL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "magento.fullname" . }}
-                  key: database-password
-          volumeMounts:
-            - mountPath: /var/lib/mysql
-              name: data
-              subPath: mysql
-          resources:
-            {{- toYaml .Values.resources.database | nindent 12 }}
-
-        {{- if .Values.opensearch.enabled }}
-        - name: opensearch
-          image: "{{ .Values.opensearch.image }}:{{ .Values.opensearch.tag }}"
-          env:
-            - name: discovery.type
-              value: single-node
-            - name: DISABLE_SECURITY_PLUGIN
-              value: "true"
-            - name: OPENSEARCH_JAVA_OPTS
-              value: {{ .Values.opensearch.javaOpts | quote }}
-          volumeMounts:
-            - mountPath: /usr/share/opensearch/data
-              name: data
-              subPath: opensearch
-          resources:
-            {{- toYaml .Values.resources.opensearch | nindent 12 }}
-        {{- end }}
+        # Database and OpenSearch are now native sidecars (see initContainers above)
 
         {{- range .Values.gitSync.plugins }}
         - name: git-sync-{{ .name }}

@@ -12,6 +12,8 @@ magento:
   language: en_GB
   currency: GBP
   timezone: Europe/London
+  # Deploy mode: developer (static content on-the-fly) or production (pre-compiled)
+  mode: developer
 
 # Admin users - first user is primary (used for setup:install)
 # All users are synced on every pod restart (idempotent)
@@ -134,7 +136,8 @@ resources:
 
 # Health checks
 healthCheck:
-  initialDelaySeconds: 30
+  # Increased to allow init-setup container to complete before main container health check
+  initialDelaySeconds: 120
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 30
