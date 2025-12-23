@@ -152,11 +152,8 @@ data:
       mage setup:upgrade
       mage setup:di:compile
 
-      # Resize catalog images if sample data was copied (requires DI compile first)
-      if [ "$SAMPLE_DATA_COPIED" = true ]; then
-        echo "Resizing catalog images for sample data..."
-        mage catalog:images:resize
-      fi
+      # Note: catalog:images:resize runs in postStart after store views are created
+      # This ensures all themes (Luma, Hyva, etc.) get their image caches
 
       # Mark as fresh install for postStart hooks
       touch /var/www/html/var/.fresh-install
@@ -260,9 +257,6 @@ data:
     if [ -f /var/www/html/var/.fresh-install ]; then
       INSTALL_TYPE="install"
       rm -f /var/www/html/var/.fresh-install
-      # Resize catalog images for sample data (runs async, can take several minutes)
-      echo "Resizing catalog images..."
-      mage catalog:images:resize || true
     fi
 
     {{- if or .Values.hooks.postInstall .Values.hooks.postUpgrade }}
@@ -296,6 +290,12 @@ data:
 {{ .Values.postScript | indent 4 }}
     {{- end }}
     {{- end }}
+
+    # Resize catalog images for all stores/themes (must run after store creation)
+    if [ "$INSTALL_TYPE" = "install" ]; then
+      echo "Resizing catalog images for all store views..."
+      mage catalog:images:resize || true
+    fi
 
     # Final cleanup
     echo "Running final cleanup..."
