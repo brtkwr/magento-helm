@@ -216,6 +216,17 @@ data:
     }
     export -f magento_config_set_store
 
+    {{- if .Values.gitSync.plugins }}
+    # Ensure git-sync symlinks exist (in case init containers didn't run)
+    echo "Setting up git-sync plugin symlinks..."
+    {{- range .Values.gitSync.plugins }}
+    mkdir -p $(dirname /var/www/html/{{ .path }})
+    rm -rf /var/www/html/{{ .path }}
+    ln -sfn /var/www/html/git-sync/{{ .name }}/code /var/www/html/{{ .path }}
+    echo "Symlink: {{ .path }} -> git-sync/{{ .name }}/code"
+    {{- end }}
+    {{- end }}
+
     # Wait for init-setup to complete (marker file)
     echo "Waiting for init-setup to complete..."
     for i in $(seq 1 120); do
