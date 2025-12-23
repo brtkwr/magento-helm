@@ -140,15 +140,23 @@ data:
       # Enable store codes in URLs
       mage config:set web/url/use_store 1
 
-      # Copy sample data media if present
+      # Copy sample data media if present (resize happens after DI compile)
+      SAMPLE_DATA_COPIED=false
       if [ -d /var/www/html/vendor/magento/sample-data-media/catalog ]; then
         cp -r /var/www/html/vendor/magento/sample-data-media/* /var/www/html/pub/media/
         chown -R www-data:www-data /var/www/html/pub/media/
         echo "Sample data media files copied"
+        SAMPLE_DATA_COPIED=true
       fi
 
       mage setup:upgrade
       mage setup:di:compile
+
+      # Resize catalog images if sample data was copied (requires DI compile first)
+      if [ "$SAMPLE_DATA_COPIED" = true ]; then
+        echo "Resizing catalog images for sample data..."
+        mage catalog:images:resize
+      fi
 
       # Mark as fresh install for postStart hooks
       touch /var/www/html/var/.fresh-install
