@@ -136,6 +136,13 @@ helm install magento oci://ghcr.io/brtkwr/charts/magento \
 
 The chart supports git-sync sidecars for live plugin development. Changes pushed to your repo are reflected within 60 seconds.
 
+### How it works
+
+1. **Init container** clones the repo with `--one-time` to ensure code exists before setup
+2. **Sidecar container** continuously syncs with `--period=60s`
+3. **`--link=code`** creates a stable symlink that git-sync maintains (handles worktree hash changes automatically)
+4. **Setup scripts** create symlinks from `app/code/Vendor/Module` → `git-sync/plugin/code`
+
 ### Configuration
 
 ```yaml
@@ -162,6 +169,21 @@ gitSync:
       path: app/code/YourVendor/Payment
 ```
 
+### Private Repos
+
+For private repositories, provide credentials:
+
+```yaml
+gitSync:
+  credentials:
+    existingSecret: git-credentials  # Secret with 'token' key containing PAT
+  plugins:
+    - name: my-plugin
+      repo: https://github.com/your-org/private-plugin.git
+      branch: main
+      path: app/code/YourVendor/Module
+```
+
 ### Disabling Git-Sync
 
 For production, disable git-sync and bake plugins into your image:
@@ -170,6 +192,16 @@ For production, disable git-sync and bake plugins into your image:
 gitSync:
   plugins: []
 ```
+
+### Cache Flush After Sync
+
+Currently, you must manually flush Magento's cache after code changes:
+
+```bash
+kubectl exec deploy/magento -c magento -- bin/magento cache:flush
+```
+
+**Future enhancement:** The chart may add `--exechook` support to automatically flush cache on every sync.
 
 ## Docker Images
 
@@ -245,7 +277,7 @@ The chart persists data across pod restarts using a PVC with the following mount
 
 2. **Setup script** - Detects if Magento is already installed by checking for `app/etc/env.php`:
    - **If exists**: Runs `setup:upgrade` + `di:compile` (fast upgrade path)
-   - **If missing**: Runs full `setup:install` (initial installation)
+   - **If missing**: Runs full `setup:install` + copies sample data media + runs `catalog:images:resize`
 
 3. **Lifecycle hooks** - Custom commands run at various stages (configure stores, rebuild CSS, etc.)
 
