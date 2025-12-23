@@ -12,6 +12,11 @@ data:
 
     cd /var/www/html
 
+    # Run bin/magento commands as www-data to ensure correct file ownership
+    mage() {
+      runuser -u www-data -- bin/magento "$@"
+    }
+
     fix_permissions() {
       echo "Fixing permissions..."
       chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ 2>/dev/null || true
@@ -67,7 +72,7 @@ data:
       cp app/etc/env.php app/etc/env.php.bak
 
       echo "Running setup:upgrade..."
-      bin/magento setup:upgrade || {
+      mage setup:upgrade || {
         echo "setup:upgrade failed, restoring env.php backup"
         cp app/etc/env.php.bak app/etc/env.php
         exit 1
@@ -77,7 +82,7 @@ data:
       rm -rf generated/code generated/metadata
 
       echo "Running setup:di:compile..."
-      bin/magento setup:di:compile || {
+      mage setup:di:compile || {
         echo "setup:di:compile failed, restoring env.php backup"
         cp app/etc/env.php.bak app/etc/env.php
         exit 1
@@ -94,13 +99,13 @@ data:
       "
 
       # Set deploy mode
-      bin/magento deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
+      mage deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
 
     else
       echo "=== FRESH INSTALL ==="
 
       {{- $primaryUser := index .Values.adminUsers 0 }}
-      bin/magento setup:install \
+      mage setup:install \
         --base-url="https://{{ .Values.magento.host }}/" \
         --base-url-secure="https://{{ .Values.magento.host }}/" \
         --db-host='127.0.0.1' \
@@ -124,25 +129,26 @@ data:
         {{- end }}
 
       # Disable 2FA for development
-      bin/magento module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true
+      mage module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true
 
       # Set deploy mode
-      bin/magento deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
+      mage deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
 
       # SSL offloader config
-      bin/magento config:set web/secure/offloader_header X-Forwarded-Proto
+      mage config:set web/secure/offloader_header X-Forwarded-Proto
 
       # Enable store codes in URLs
-      bin/magento config:set web/url/use_store 1
+      mage config:set web/url/use_store 1
 
       # Copy sample data media if present
       if [ -d /var/www/html/vendor/magento/sample-data-media/catalog ]; then
         cp -r /var/www/html/vendor/magento/sample-data-media/* /var/www/html/pub/media/
+        chown -R www-data:www-data /var/www/html/pub/media/
         echo "Sample data media files copied"
       fi
 
-      bin/magento setup:upgrade
-      bin/magento setup:di:compile
+      mage setup:upgrade
+      mage setup:di:compile
 
       # Mark as fresh install for postStart hooks
       touch /var/www/html/var/.fresh-install
@@ -151,7 +157,7 @@ data:
     # Sync all admin users (idempotent)
     echo "Syncing admin users..."
     {{- range $i, $user := .Values.adminUsers }}
-    bin/magento admin:user:create \
+    mage admin:user:create \
       --admin-firstname='{{ $user.firstname }}' \
       --admin-lastname='{{ $user.lastname }}' \
       --admin-email='{{ $user.email }}' \
@@ -160,7 +166,7 @@ data:
     {{- end }}
 
     fix_permissions
-    bin/magento maintenance:disable || true
+    mage maintenance:disable || true
 
     # Create marker file for postStart hook
     touch /var/www/html/var/.init-setup-complete
@@ -174,10 +180,41 @@ data:
 
     cd /var/www/html
 
+    # Run bin/magento commands as www-data to ensure correct file ownership
+    mage() {
+      runuser -u www-data -- bin/magento "$@"
+    }
+    export -f mage
+
     fix_permissions() {
       chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ 2>/dev/null || true
       chmod -R 775 var/ generated/ 2>/dev/null || true
     }
+
+    # Helper: Set store-level config using Magento's ConfigWriter API
+    # Usage: magento_config_set_store <store_code> <path> <value>
+    # Example: magento_config_set_store hyva design/theme/theme_id 5
+    magento_config_set_store() {
+      local store_code="$1"
+      local config_path="$2"
+      local config_value="$3"
+      runuser -u www-data -- php -r "
+        require 'app/bootstrap.php';
+        \$bootstrap = \Magento\Framework\App\Bootstrap::create(BP, \$_SERVER);
+        \$obj = \$bootstrap->getObjectManager();
+        \$storeManager = \$obj->get(\Magento\Store\Model\StoreManagerInterface::class);
+        \$configWriter = \$obj->get(\Magento\Framework\App\Config\Storage\WriterInterface::class);
+        try {
+          \$store = \$storeManager->getStore('$store_code');
+          \$configWriter->save('$config_path', '$config_value', \Magento\Store\Model\ScopeInterface::SCOPE_STORES, \$store->getId());
+          echo \"Set $config_path = $config_value for store $store_code (ID: \" . \$store->getId() . \")\n\";
+        } catch (\Exception \$e) {
+          echo \"Error: \" . \$e->getMessage() . \"\n\";
+          exit(1);
+        }
+      "
+    }
+    export -f magento_config_set_store
 
     # Wait for init-setup to complete (marker file)
     echo "Waiting for init-setup to complete..."
@@ -204,6 +241,9 @@ data:
     if [ -f /var/www/html/var/.fresh-install ]; then
       INSTALL_TYPE="install"
       rm -f /var/www/html/var/.fresh-install
+      # Resize catalog images for sample data (runs async, can take several minutes)
+      echo "Resizing catalog images..."
+      mage catalog:images:resize || true
     fi
 
     {{- if or .Values.hooks.postInstall .Values.hooks.postUpgrade }}
@@ -240,10 +280,10 @@ data:
 
     # Final cleanup
     echo "Running final cleanup..."
-    bin/magento app:config:import --no-interaction || true
-    bin/magento indexer:reindex || true
-    bin/magento cache:flush
-    bin/magento maintenance:disable || true
+    mage app:config:import --no-interaction || true
+    mage indexer:reindex || true
+    mage cache:flush
+    mage maintenance:disable || true
     fix_permissions
 
     # Reload Apache to pick up any changes
