@@ -47,3 +47,14 @@ Selector labels
 app.kubernetes.io/name: {{ include "magento.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+Secret name - uses existingSecret if provided, otherwise uses fullname
+*/}}
+{{- define "magento.secretName" -}}
+{{- if .Values.existingSecret }}
+{{- .Values.existingSecret }}
+{{- else }}
+{{- include "magento.fullname" . }}
+{{- end }}
+{{- end }}

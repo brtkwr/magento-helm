@@ -55,7 +55,7 @@ spec:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "magento.fullname" . }}
+                  name: {{ include "magento.secretName" . }}
                   key: database-password
             - name: MYSQL_DATABASE
               value: {{ .Values.database.name | quote }}
@@ -64,7 +64,7 @@ spec:
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "magento.fullname" . }}
+                  name: {{ include "magento.secretName" . }}
                   key: database-password
           volumeMounts:
             - mountPath: /var/lib/mysql
@@ -137,14 +137,17 @@ spec:
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "magento.fullname" . }}
+                  name: {{ include "magento.secretName" . }}
                   key: database-password
             {{- range $i, $user := .Values.adminUsers }}
             - name: ADMIN_PASSWORD_{{ $i }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "magento.fullname" $ }}
-                  key: admin-password-{{ $i }}
+                  name: {{ include "magento.secretName" $ }}
+                  key: {{ $user.passwordKey }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
             - mountPath: /var/www/html/var
@@ -189,14 +192,17 @@ spec:
             - name: MYSQL_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "magento.fullname" . }}
+                  name: {{ include "magento.secretName" . }}
                   key: database-password
             {{- range $i, $user := .Values.adminUsers }}
             - name: ADMIN_PASSWORD_{{ $i }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "magento.fullname" $ }}
-                  key: admin-password-{{ $i }}
+                  name: {{ include "magento.secretName" $ }}
+                  key: {{ $user.passwordKey }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
             - mountPath: /var/www/html/var

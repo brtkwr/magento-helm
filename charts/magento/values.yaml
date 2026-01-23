@@ -23,19 +23,20 @@ adminUsers:
     email: admin@example.com
     firstname: Admin
     lastname: User
-    password: ""  # Set via --set adminUsers[0].password=xxx
+    password: ""  # Set via --set, or use passwordKey with existingSecret
+    passwordKey: admin-password  # Key in secret for this user's password
 # Example:
 # adminUsers:
 #   - username: brtkwr
 #     email: bkunwar@two.inc
 #     firstname: Bharat
 #     lastname: Kunwar
-#     password: mypassword123
+#     passwordKey: admin-password-brtkwr
 #   - username: shabib
 #     email: shabib@two.inc
 #     firstname: Salman
 #     lastname: Habib
-#     password: anotherpassword456
+#     passwordKey: admin-password-shabib
 
 # Lifecycle hooks for injecting scripts at different stages
 # All hooks should be idempotent (safe to run multiple times)
@@ -59,11 +60,28 @@ hooks:
 # DEPRECATED: Use hooks.postSetup instead
 postScript: ""
 
+# Existing secret containing database and admin passwords
+# If set, the chart will NOT create its own secret
+# Expected keys: database-password, admin-password-0, admin-password-1, etc.
+# Optional keys: api-key (injected as MAGENTO_API_KEY env var)
+existingSecret: ""
+
+# Extra environment variables to inject into the magento container
+# Useful for injecting API keys or other secrets
+extraEnv: []
+# Example:
+# extraEnv:
+#   - name: TWO_API_KEY
+#     valueFrom:
+#       secretKeyRef:
+#         name: my-secret
+#         key: api-key
+
 # Database (MariaDB sidecar)
 database:
   name: magento
   user: magento
-  # password: set via --set or secrets
+  # password: set via --set or secrets (ignored if existingSecret is set)
   image: mariadb
   tag: "10.6"
   storage: 10Gi

@@ -45,8 +45,10 @@ See [values.yaml](charts/magento/values.yaml) for all options.
 | `magento.host` | Store URL hostname | `magento.example.com` |
 | `magento.currency` | Store currency | `GBP` |
 | `magento.language` | Store language | `en_GB` |
+| `existingSecret` | Name of existing secret for passwords | `""` |
+| `extraEnv` | Extra environment variables for containers | `[]` |
 | `adminUsers` | Array of admin users | (see below) |
-| `database.password` | MariaDB password | (generated) |
+| `database.password` | MariaDB password (ignored if existingSecret set) | (generated) |
 | `gitSync.plugins` | Array of git repos to sync | `[]` |
 
 ### Admin Users
@@ -68,6 +70,82 @@ adminUsers:
 ```
 
 **Note:** Roles must be assigned via the Magento admin panel - the CLI doesn't support role assignment.
+
+### Using Existing Secrets
+
+Instead of passing passwords via `--set` or values files, you can reference a pre-existing Kubernetes secret:
+
+```yaml
+existingSecret: my-magento-secrets
+```
+
+When `existingSecret` is set, the chart will **not** create its own secret and will reference the existing one instead.
+
+**Required secret keys:**
+
+| Key | Description |
+|-----|-------------|
+| `database-password` | MariaDB root and user password |
+| `<passwordKey>` | Password for each admin user (key name specified in values) |
+
+**Creating the secret:**
+
+```bash
+kubectl create secret generic my-magento-secrets \
+  --namespace magento \
+  --from-literal=database-password=MyDBPassword123 \
+  --from-literal=admin-password-admin=AdminPass123 \
+  --from-literal=admin-password-developer=DevPass456
+```
+
+**Example values file with existingSecret:**
+
+```yaml
+existingSecret: my-magento-secrets
+
+adminUsers:
+  - username: admin
+    email: admin@example.com
+    firstname: Admin
+    lastname: User
+    passwordKey: admin-password-admin  # References key in secret
+  - username: developer
+    email: dev@example.com
+    firstname: Dev
+    lastname: User
+    passwordKey: admin-password-developer
+
+database:
+  name: magento
+  user: magento
+  # password not needed - read from secret
+```
+
+### Extra Environment Variables
+
+You can inject additional environment variables into the Magento containers using `extraEnv`. This is useful for API keys or other secrets needed in lifecycle hooks.
+
+```yaml
+extraEnv:
+  - name: TWO_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: my-magento-secrets
+        key: api-key
+  - name: SOME_OTHER_VAR
+    value: "static-value"
+```
+
+These variables are available in both the `init-setup` container and the main `magento` container, so you can reference them in your `hooks.postSetup` scripts:
+
+```yaml
+hooks:
+  postSetup: |
+    php -r "
+      \$key = getenv('TWO_API_KEY');
+      // use the key...
+    "
+```
 
 ### Production Example
 
