@@ -1,0 +1,41 @@
+name: Claude Code Review
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  code-review:
+    runs-on: ${{ vars.RUNNER_STANDARD }}
+    if: >
+      (github.event_name == 'pull_request_target') ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude'))
+    steps:
+      - uses: two-inc/claude-code-reviewer@v4
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_prompt: |
+
+              ## Magento Helm Chart Specific Guidelines:
+
+              For this Helm chart repository, pay special attention to:
+              - **Helm best practices**: Follow Helm chart conventions and templating patterns
+              - **Values schema**: Ensure values.yaml changes are backward compatible
+              - **Template rendering**: Check for proper Go templating syntax and conditionals
+              - **Resource definitions**: Verify Kubernetes resource specs (deployments, services, ingress)
+              - **Chart versioning**: Check Chart.yaml version follows semver
+              - **Dependencies**: Review chart dependencies and version constraints
+              - **ConfigMaps/Secrets**: Verify proper secret management and config mounting
+              - **Testing**: Ensure chart can be rendered and validated (helm template, helm lint)
