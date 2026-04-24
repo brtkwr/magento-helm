@@ -64,6 +64,22 @@ data:
     done
     {{- end }}
 
+    # Restore sample-data-media if missing (idempotent via cp -n).
+    # Runs for both install and upgrade paths so PVCs that lost their media
+    # (or were created before this copy block existed) can recover without a
+    # manual intervention. If the catalog was empty before the copy, flag a
+    # marker so postStart runs catalog:images:resize to populate the cache.
+    if [ -d /var/www/html/vendor/magento/sample-data-media/catalog ]; then
+      CATALOG_BEFORE=$(find /var/www/html/pub/media/catalog/product -type f 2>/dev/null | head -1)
+      cp -rn /var/www/html/vendor/magento/sample-data-media/* /var/www/html/pub/media/
+      chown -R www-data:www-data /var/www/html/pub/media/
+      CATALOG_AFTER=$(find /var/www/html/pub/media/catalog/product -type f 2>/dev/null | head -1)
+      if [ -z "$CATALOG_BEFORE" ] && [ -n "$CATALOG_AFTER" ]; then
+        echo "Sample data media restored from image — flagging catalog resize"
+        touch /var/www/html/var/.needs-catalog-resize
+      fi
+    fi
+
     # Check if Magento is already installed
     if [ -f app/etc/env.php ]; then
       echo "=== UPGRADE PATH ==="
@@ -139,15 +155,6 @@ data:
 
       # Enable store codes in URLs
       mage config:set web/url/use_store 1
-
-      # Copy sample data media if present (resize happens after DI compile)
-      SAMPLE_DATA_COPIED=false
-      if [ -d /var/www/html/vendor/magento/sample-data-media/catalog ]; then
-        cp -r /var/www/html/vendor/magento/sample-data-media/* /var/www/html/pub/media/
-        chown -R www-data:www-data /var/www/html/pub/media/
-        echo "Sample data media files copied"
-        SAMPLE_DATA_COPIED=true
-      fi
 
       mage setup:upgrade
       mage setup:di:compile
@@ -291,10 +298,13 @@ data:
     {{- end }}
     {{- end }}
 
-    # Resize catalog images for all stores/themes (must run after store creation)
-    if [ "$INSTALL_TYPE" = "install" ]; then
+    # Resize catalog images for all stores/themes (must run after store creation).
+    # Runs on fresh install, or on upgrade when init-setup restored missing
+    # sample data (marker file set in that branch).
+    if [ "$INSTALL_TYPE" = "install" ] || [ -f /var/www/html/var/.needs-catalog-resize ]; then
       echo "Resizing catalog images for all store views..."
       mage catalog:images:resize || true
+      rm -f /var/www/html/var/.needs-catalog-resize
     fi
 
     # Final cleanup
