@@ -438,6 +438,78 @@ kubectl exec deploy/magento -c magento -- bin/magento indexer:reindex
 kubectl exec deploy/magento -c magento -- bin/magento module:status
 ```
 
+### Missing sample-data media / CMS styling broken
+
+**Symptom**: Luma homepage renders as a flat stack of text/images instead of the styled hero banner + promo grid. Broken `<img>` placeholders for `/media/wysiwyg/home/*.jpg` and/or console errors like:
+
+```
+Refused to apply style from '.../media/styles.css' because its MIME type
+('text/html') is not a supported stylesheet MIME type
+```
+
+**Root cause**: Magento's sample data lives in two separate vendor packages and populates the PVC in different places:
+
+| Package | Populates | Chart-level restore on upgrade |
+|---|---|---|
+| `vendor/magento/sample-data-media` | `pub/media/catalog/product/**`, `pub/media/wysiwyg/**` | Yes (chart ≥ 0.11.1, copied via `cp -rn` in init-setup) |
+| `vendor/magento/module-cms-sample-data/fixtures/styles.css` | `pub/media/styles.css` — the actual stylesheet that styles `.block-promo.home-main`, `.block-promo-wrapper`, etc. | **No** — fresh install only, via fixture loader |
+
+The `design/head/includes` core_config_data row injects `<link rel="stylesheet" href="{{MEDIA_URL}}styles.css">` into every page. When the PVC loses `pub/media/styles.css` (e.g. reprovisioned or restored from a backup that didn't include media), the link resolves to a 404 HTML page, browsers reject it for wrong MIME type, and the Luma CMS grid renders unstyled.
+
+**Diagnosis**:
+
+```bash
+# Does the page reference the stylesheet?
+curl -s https://your-host/ | grep '/media/styles.css'
+
+# Does the stylesheet actually serve as CSS?
+curl -sI https://your-host/media/styles.css
+# Expect: 200 + content-type: text/css. If 404 or text/html → broken.
+
+# Is the file on disk?
+kubectl exec deploy/magento -c magento -- ls -la /var/www/html/pub/media/styles.css
+
+# Is the head-includes config present?
+kubectl exec deploy/magento -c magento -- bash -c \
+  "mysql -h 127.0.0.1 -u magento -p\"\$MYSQL_PASSWORD\" magento --skip-ssl -e \
+   'SELECT path, value FROM core_config_data WHERE path=\"design/head/includes\"'"
+```
+
+**Fix**:
+
+```bash
+POD=$(kubectl get pod -l app.kubernetes.io/name=magento -o name | head -1)
+
+# 1. Restore the stylesheet from the vendor fixture
+kubectl exec -c magento $POD -- bash -c \
+  "cp /var/www/html/vendor/magento/module-cms-sample-data/fixtures/styles.css \
+      /var/www/html/pub/media/styles.css && \
+   chown www-data:www-data /var/www/html/pub/media/styles.css"
+
+# 2. Restore the head-include config if missing
+kubectl exec -c magento $POD -- bash -c \
+  "mysql -h 127.0.0.1 -u magento -p\"\$MYSQL_PASSWORD\" magento --skip-ssl -e \
+   'INSERT INTO core_config_data (scope, scope_id, path, value)
+    VALUES (\"default\", 0, \"design/head/includes\",
+            \"<link rel=\\\"stylesheet\\\" type=\\\"text/css\\\" media=\\\"all\\\" href=\\\"{{MEDIA_URL}}styles.css\\\" />\")
+    ON DUPLICATE KEY UPDATE value=VALUES(value)'"
+
+# 3. Flush config + page cache
+kubectl exec -c magento $POD -- \
+  runuser -u www-data -- bin/magento cache:clean config full_page
+```
+
+Hard reload the page (Cmd/Ctrl+Shift+R) to bypass the browser's cached broken-MIME response.
+
+**For the same PVC also missing `wysiwyg/` or `catalog/product/` contents** (product thumbnails broken, not just the CMS grid): chart ≥ 0.11.1 handles this automatically via idempotent `cp -rn` of `sample-data-media` on init-setup. On older chart versions, restore manually:
+
+```bash
+kubectl exec -c magento $POD -- bash -c \
+  "cp -rn /var/www/html/vendor/magento/sample-data-media/* /var/www/html/pub/media/ && \
+   chown -R www-data:www-data /var/www/html/pub/media && \
+   runuser -u www-data -- bin/magento catalog:images:resize"
+```
+
 ## Contributing
 
 1. Fork the repository
