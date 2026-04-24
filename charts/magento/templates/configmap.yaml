@@ -80,6 +80,20 @@ data:
       fi
     fi
 
+    # Restore the sample-data CMS stylesheet. Ships with module-cms-sample-data
+    # and is referenced by the 'design/head/includes' core_config_data row
+    # (value: <link ... href="{{ "{{" }}MEDIA_URL}}styles.css" />). Contains the
+    # .block-promo.* rules that style
+    # the Luma homepage CMS grid. The fresh-install fixture loader drops it
+    # into pub/media/, but nothing restores it on upgrade if the PVC loses it.
+    if [ -f /var/www/html/vendor/magento/module-cms-sample-data/fixtures/styles.css ] \
+       && [ ! -f /var/www/html/pub/media/styles.css ]; then
+      cp /var/www/html/vendor/magento/module-cms-sample-data/fixtures/styles.css \
+         /var/www/html/pub/media/styles.css
+      chown www-data:www-data /var/www/html/pub/media/styles.css
+      echo "Sample data styles.css restored to pub/media/"
+    fi
+
     # Check if Magento is already installed
     if [ -f app/etc/env.php ]; then
       echo "=== UPGRADE PATH ==="
@@ -113,6 +127,11 @@ data:
           echo \"Fixed missing install date in env.php\n\";
         }
       "
+
+      # Disable 2FA modules on every upgrade too — sample-data fixtures or
+      # a setup:upgrade from a vendor version where they were enabled can
+      # otherwise lock admins out after an upgrade.
+      mage module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true
 
       # Set deploy mode
       mage deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
