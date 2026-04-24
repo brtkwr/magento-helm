@@ -438,6 +438,46 @@ kubectl exec deploy/magento -c magento -- bin/magento indexer:reindex
 kubectl exec deploy/magento -c magento -- bin/magento module:status
 ```
 
+### PVC full / OpenSearch "No space left on device"
+
+**Symptom**: Pod stuck in `Init:CrashLoopBackOff`. OpenSearch init container logs show `java.io.IOException: No space left on device`. The magento init-setup container hangs on "Waiting for OpenSearch..." until it times out.
+
+**Root cause**: Magento's file-based full-page cache (`var/page_cache`) grows unbounded. Crawler bots — especially `meta-webindexer` from Facebook — crawl all layered navigation filter combinations, creating a unique cache entry per combination. With multiple store views and combinatorial filter params, the cache can grow to 8 GB+ with 70k+ files and fill even a generously-sized PVC.
+
+**Diagnosis**: the pod is pending so you can't `kubectl exec` into it. Launch a one-shot debug pod mounted on the same PVC instead:
+
+```bash
+kubectl run -n <namespace> pvc-debug --restart=Never --image=busybox \
+  --overrides='{"spec":{"containers":[{"name":"pvc-debug","image":"busybox","command":["sh","-c","du -sh /data/* /data/magento/* /data/magento/var/* 2>/dev/null | sort -hr"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"<release-name>"}}]}}' \
+  && sleep 5 \
+  && kubectl logs -n <namespace> pvc-debug \
+  && kubectl delete pod -n <namespace> pvc-debug --wait=false
+```
+
+**Fix** (clear page cache):
+
+```bash
+kubectl run -n <namespace> pvc-clear --restart=Never --image=busybox \
+  --overrides='{"spec":{"containers":[{"name":"pvc-clear","image":"busybox","command":["sh","-c","rm -rf /data/magento/var/page_cache/* && echo CLEARED"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"<release-name>"}}]}}' \
+  && sleep 5 \
+  && kubectl logs -n <namespace> pvc-clear \
+  && kubectl delete pod -n <namespace> pvc-clear --wait=false \
+  && kubectl rollout restart deployment/<release-name> -n <namespace>
+```
+
+**Prevention**: block crawlers at your ingress. `robots.txt` is advisory only — `meta-webindexer` ignores it. Example nginx-ingress annotation:
+
+```yaml
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/server-snippet: |
+      if ($http_user_agent ~* (bot|crawler|spider|meta-webindexer|googlebot|bingbot|facebookexternalhit)) {
+        return 403;
+      }
+```
+
+Longer-term: switch Magento's cache backend to Redis (`cache.frontend.default.backend`) so page cache no longer lives on the PVC, and/or schedule a `bin/magento cache:clean full_page` cron.
+
 ### Missing sample-data media / CMS styling broken
 
 **Symptom**: Luma homepage renders as a flat stack of text/images instead of the styled hero banner + promo grid. Broken `<img>` placeholders for `/media/wysiwyg/home/*.jpg` and/or console errors like:
