@@ -136,6 +136,32 @@ gitSync:
   #     path: app/code/YourVendor/Module
   #     private: false  # set to true for private repos (uses credentials.token)
 
+  # Auto-reload Magento when git-sync pulls a new SHA on any plugin branch.
+  # On every change detection, the watcher runs a mode-appropriate reload:
+  #   * production  -> bin/magento setup:static-content:deploy <locales>
+  #   * developer   -> rm -rf <developerClearPaths> (regenerated lazily)
+  # then bin/magento cache:flush + apachectl -k graceful.
+  # Disable entirely if you want plugin pushes to take effect only on pod
+  # restart (e.g. in real production deployments where git-sync is unused).
+  reload:
+    enabled: true
+    # Sleep before the watcher's first poll, after setup.sh forks it.
+    # Gives setup.sh time to finish its own final cache:flush / apachectl.
+    initialDelaySeconds: 30
+    # Poll interval for symlink-target change detection.
+    # git-sync sidecar polls upstream every 60s by default, so anything
+    # under 60s is wasted CPU; anything much over 60s adds rollout lag.
+    pollIntervalSeconds: 30
+    # Paths cleared in developer mode on git-sync change. Each path is
+    # rm -rf'd; trailing /* clears contents but keeps the parent dir.
+    developerClearPaths:
+      - /var/www/html/generated/code
+      - /var/www/html/generated/metadata
+      - /var/www/html/pub/static/frontend/*
+      - /var/www/html/pub/static/_cache
+      - /var/www/html/var/view_preprocessed
+      - /var/www/html/var/cache/*
+
 # Resources
 resources:
   magento:
