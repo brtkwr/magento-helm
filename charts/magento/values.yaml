@@ -15,6 +15,14 @@ magento:
   # Deploy mode: developer (static content on-the-fly) or production (pre-compiled)
   mode: developer
 
+# In production mode the chart runs `bin/magento setup:static-content:deploy`
+# at the end of setup.sh and on every git-sync plugin SHA flip, so static
+# assets are materialised as real files for the listed locales. Ignored when
+# magento.mode is `developer` (assets generated lazily on first request).
+staticContentDeploy:
+  locales:
+    - en_GB
+
 # Admin users - first user is primary (used for setup:install)
 # All users are synced on every pod restart (idempotent)
 # Note: Roles must be assigned via admin panel - CLI doesn't support role assignment
