@@ -32,6 +32,20 @@ data:
     ln -sf /var/www/html/git-sync/{{ .name }}/code /var/www/html/{{ .path }}
     echo "Symlink: {{ .path }} -> git-sync/{{ .name }}/code"
     {{- end }}
+
+    # Seed git-sync markers immediately after symlinks land. Captures the
+    # SHA before init-setup compiles DI and before postSetup runs its long
+    # npm/build/config:set steps — so any sidecar-driven flip during those
+    # phases is caught by the watcher's first poll instead of being silently
+    # adopted as "no change".
+    for link in /var/www/html/git-sync/*/code; do
+      [ -L "$link" ] || continue
+      name=$(basename "$(dirname "$link")")
+      current=$(readlink -f "$link" 2>/dev/null || true)
+      [ -n "$current" ] || continue
+      echo "$current" > "/var/www/html/var/.gitsync-${name}-head"
+      echo "git-sync marker seeded for ${name}: ${current}"
+    done
     {{- end }}
 
     # Wait for database (sidecar should be ready)
@@ -345,17 +359,9 @@ data:
 
     {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled }}
     # Auto-reload Magento when git-sync pulls a new commit on any plugin branch.
-    # Markers are seeded synchronously before the watcher forks so the loop has
-    # a known baseline on its first tick — any flip during pod startup triggers
-    # a real reload instead of being silently adopted as "no change".
-    for link in /var/www/html/git-sync/*/code; do
-      [ -L "$link" ] || continue
-      name=$(basename "$(dirname "$link")")
-      current=$(readlink -f "$link" 2>/dev/null || true)
-      [ -n "$current" ] || continue
-      echo "$current" > "/var/www/html/var/.gitsync-${name}-head"
-      echo "git-sync marker seeded for ${name}: ${current}"
-    done
+    # Markers were seeded in init-setup right after symlinks were created, so
+    # any flip during init-setup's DI compile or this script's long postSetup
+    # phase is reliably caught by the watcher's first poll.
     (
       sleep {{ .Values.gitSync.reload.initialDelaySeconds }}
       while true; do
