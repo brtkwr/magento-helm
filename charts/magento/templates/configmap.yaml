@@ -334,6 +334,70 @@ data:
     mage maintenance:disable || true
     fix_permissions
 
+    {{- if eq .Values.magento.mode "production" }}
+    # Production mode: pre-deploy static content for configured locales.
+    # In developer mode this is skipped — assets are generated lazily as
+    # symlinks into the source tree on first request.
+    echo "Deploying static content for locales: {{ join " " .Values.staticContentDeploy.locales }}..."
+    mage setup:static-content:deploy {{ join " " .Values.staticContentDeploy.locales }} -f || true
+    fix_permissions
+    {{- end }}
+
+    {{- if .Values.gitSync.plugins }}
+    # Auto-reload Magento when git-sync pulls a new commit on any plugin branch.
+    # Markers are seeded synchronously before the watcher forks so the loop has
+    # a known baseline on its first tick — any flip during pod startup triggers
+    # a real reload instead of being silently adopted as "no change".
+    for link in /var/www/html/git-sync/*/code; do
+      [ -L "$link" ] || continue
+      name=$(basename "$(dirname "$link")")
+      current=$(readlink -f "$link" 2>/dev/null || true)
+      [ -n "$current" ] || continue
+      echo "$current" > "/var/www/html/var/.gitsync-${name}-head"
+      echo "git-sync marker seeded for ${name}: ${current}"
+    done
+    (
+      sleep 30
+      while true; do
+        changed=false
+        for link in /var/www/html/git-sync/*/code; do
+          [ -L "$link" ] || continue
+          name=$(basename "$(dirname "$link")")
+          current=$(readlink -f "$link" 2>/dev/null || true)
+          [ -n "$current" ] || continue
+          marker="/var/www/html/var/.gitsync-${name}-head"
+          previous=$(cat "$marker" 2>/dev/null || true)
+          if [ "$previous" != "$current" ]; then
+            echo "git-sync change detected for ${name}: ${previous:-<none>} -> ${current}"
+            echo "$current" > "$marker"
+            changed=true
+          fi
+        done
+        if $changed; then
+          {{- if eq .Values.magento.mode "production" }}
+          # Production mode: re-deploy static content from the new SHA.
+          # Materialises real files (no symlinks) so the new plugin assets are
+          # served immediately and don't depend on git-sync worktree paths
+          # that may be pruned later.
+          mage setup:static-content:deploy {{ join " " .Values.staticContentDeploy.locales }} -f || true
+          {{- else }}
+          # Developer mode: clear lazy-generated artefacts so the next request
+          # regenerates them (as symlinks) against the new SHA. Keeps DI cache
+          # in sync with whatever the plugin's di.xml / events.xml define.
+          rm -rf /var/www/html/generated/code /var/www/html/generated/metadata \
+                 /var/www/html/pub/static/frontend/* /var/www/html/pub/static/_cache \
+                 /var/www/html/var/view_preprocessed /var/www/html/var/cache/* 2>/dev/null || true
+          {{- end }}
+          mage cache:flush || true
+          fix_permissions
+          apachectl -k graceful || true
+          echo "git-sync auto-reload complete"
+        fi
+        sleep 30
+      done
+    ) &
+    {{- end }}
+
     # Reload Apache to pick up any changes
     apachectl -k graceful || true
 
