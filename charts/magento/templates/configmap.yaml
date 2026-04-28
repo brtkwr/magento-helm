@@ -343,7 +343,7 @@ data:
     fix_permissions
     {{- end }}
 
-    {{- if .Values.gitSync.plugins }}
+    {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled }}
     # Auto-reload Magento when git-sync pulls a new commit on any plugin branch.
     # Markers are seeded synchronously before the watcher forks so the loop has
     # a known baseline on its first tick — any flip during pod startup triggers
@@ -357,7 +357,7 @@ data:
       echo "git-sync marker seeded for ${name}: ${current}"
     done
     (
-      sleep 30
+      sleep {{ .Values.gitSync.reload.initialDelaySeconds }}
       while true; do
         changed=false
         for link in /var/www/html/git-sync/*/code; do
@@ -384,16 +384,14 @@ data:
           # Developer mode: clear lazy-generated artefacts so the next request
           # regenerates them (as symlinks) against the new SHA. Keeps DI cache
           # in sync with whatever the plugin's di.xml / events.xml define.
-          rm -rf /var/www/html/generated/code /var/www/html/generated/metadata \
-                 /var/www/html/pub/static/frontend/* /var/www/html/pub/static/_cache \
-                 /var/www/html/var/view_preprocessed /var/www/html/var/cache/* 2>/dev/null || true
+          rm -rf {{ join " " .Values.gitSync.reload.developerClearPaths }} 2>/dev/null || true
           {{- end }}
           mage cache:flush || true
           fix_permissions
           apachectl -k graceful || true
           echo "git-sync auto-reload complete"
         fi
-        sleep 30
+        sleep {{ .Values.gitSync.reload.pollIntervalSeconds }}
       done
     ) &
     {{- end }}
