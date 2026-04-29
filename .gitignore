@@ -5,6 +5,9 @@ docker/auth.json
 charts/magento/charts/
 *.tgz
 
+# Worktrees
+.worktrees/
+
 # IDE
 .idea/
 .vscode/

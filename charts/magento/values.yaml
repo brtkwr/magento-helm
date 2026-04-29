@@ -15,13 +15,20 @@ magento:
   # Deploy mode: developer (static content on-the-fly) or production (pre-compiled)
   mode: developer
 
-# In production mode the chart runs `bin/magento setup:static-content:deploy`
-# at the end of setup.sh and on every git-sync plugin SHA flip, so static
-# assets are materialised as real files for the listed locales. Ignored when
-# magento.mode is `developer` (assets generated lazily on first request).
+# Pre-build Magento static content during pod setup. The chart runs
+# `deploy:mode:set ... --skip-compilation`, so without this block
+# adminhtml never gets fresh CSS/JS after the initial install.
 staticContentDeploy:
+  enabled: false               # opt-in, off by default
+  areas:                       # frontend gets a separate npm build via
+    - frontend                 # Hyva tailwind in many setups, but you
+    - adminhtml                # can include both safely.
   locales:
-    - en_GB
+    - en_US
+  signing: false               # When true, sets dev/static/sign=1 so
+                               # rendered URLs include /version<ts>/...
+                               # — required for safe long-cache CDN
+                               # rules on /static/*.
 
 # Admin users - first user is primary (used for setup:install)
 # All users are synced on every pod restart (idempotent)

@@ -331,6 +331,22 @@ data:
     {{- end }}
     {{- end }}
 
+    {{- if .Values.staticContentDeploy.enabled }}
+    # Pre-deploy static content for the configured areas/locales. Without this,
+    # `deploy:mode:set ... --skip-compilation` leaves adminhtml serving stale
+    # assets after upgrades. Frontend is often handled by a Hyva tailwind npm
+    # build in postSetup, but running it here for both areas is safe (idempotent).
+    {{- range .Values.staticContentDeploy.areas }}
+    echo "Deploying static content for area={{ . }} locales: {{ join " " $.Values.staticContentDeploy.locales }}..."
+    mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }} || true
+    {{- end }}
+    # Toggle dev/static/sign so rendered /static/ URLs include /version<ts>/...
+    # — needed for safe long-cache CDN rules. Disabling reverts to unsigned URLs.
+    mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }} || true
+    mage cache:flush || true
+    fix_permissions
+    {{- end }}
+
     # Resize catalog images for all stores/themes (must run after store creation).
     # Runs on fresh install, or on upgrade when init-setup restored missing
     # sample data (marker file set in that branch).
@@ -347,15 +363,6 @@ data:
     mage cache:flush
     mage maintenance:disable || true
     fix_permissions
-
-    {{- if eq .Values.magento.mode "production" }}
-    # Production mode: pre-deploy static content for configured locales.
-    # In developer mode this is skipped — assets are generated lazily as
-    # symlinks into the source tree on first request.
-    echo "Deploying static content for locales: {{ join " " .Values.staticContentDeploy.locales }}..."
-    mage setup:static-content:deploy {{ join " " .Values.staticContentDeploy.locales }} -f || true
-    fix_permissions
-    {{- end }}
 
     {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled }}
     # Auto-reload Magento when git-sync pulls a new commit on any plugin branch.
@@ -380,16 +387,18 @@ data:
           fi
         done
         if $changed; then
-          {{- if eq .Values.magento.mode "production" }}
-          # Production mode: re-deploy static content from the new SHA.
-          # Materialises real files (no symlinks) so the new plugin assets are
-          # served immediately and don't depend on git-sync worktree paths
-          # that may be pruned later.
-          mage setup:static-content:deploy {{ join " " .Values.staticContentDeploy.locales }} -f || true
+          {{- if .Values.staticContentDeploy.enabled }}
+          # Re-deploy static content from the new SHA. Materialises real files
+          # (no symlinks) so the new plugin assets are served immediately and
+          # don't depend on git-sync worktree paths that may be pruned later.
+          {{- range .Values.staticContentDeploy.areas }}
+          mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }} || true
+          {{- end }}
           {{- else }}
-          # Developer mode: clear lazy-generated artefacts so the next request
-          # regenerates them (as symlinks) against the new SHA. Keeps DI cache
-          # in sync with whatever the plugin's di.xml / events.xml define.
+          # Static-content-deploy disabled: clear lazy-generated artefacts so
+          # the next request regenerates them (as symlinks in developer mode)
+          # against the new SHA. Keeps DI cache in sync with whatever the
+          # plugin's di.xml / events.xml define.
           rm -rf {{ join " " .Values.gitSync.reload.developerClearPaths }} 2>/dev/null || true
           {{- end }}
           mage cache:flush || true
