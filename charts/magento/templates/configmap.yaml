@@ -387,6 +387,33 @@ data:
           fi
         done
         if $changed; then
+          {{- if .Values.gitSync.reload.compile }}
+          # Full rebuild path: rotation included DI/schema-affecting changes
+          # (new di.xml preferences, constructor deps, or db_schema.xml). Run
+          # the same sequence cold-start does so the running pod picks them
+          # up without a kubectl rollout restart. flock serialises rebuilds
+          # so a fast burst of rotations doesn't race itself.
+          (
+            flock -n 9 || { echo "rotation rebuild already in flight, skipping"; exit 0; }
+            mage setup:upgrade
+            rm -rf generated/code/* generated/metadata
+            mage setup:di:compile
+            {{- if eq .Values.magento.mode "production" }}
+            {{- range .Values.staticContentDeploy.areas }}
+            mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }}
+            {{- end }}
+            {{- end }}
+            mage cache:flush
+            fix_permissions
+            apachectl -k graceful || true
+            sleep 2
+            smoke=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/health_check.php || echo "000")
+            if [ "$smoke" != "200" ]; then
+              echo "ALERT: post-rotation smoke failed: HTTP $smoke"
+            fi
+            echo "git-sync auto-reload (full rebuild) complete"
+          ) 9>/var/www/html/var/.gitsync-rebuild.lock
+          {{- else }}
           {{- if .Values.staticContentDeploy.enabled }}
           # Re-deploy static content from the new SHA. Materialises real files
           # (no symlinks) so the new plugin assets are served immediately and
@@ -405,6 +432,7 @@ data:
           fix_permissions
           apachectl -k graceful || true
           echo "git-sync auto-reload complete"
+          {{- end }}
         fi
         sleep {{ .Values.gitSync.reload.pollIntervalSeconds }}
       done

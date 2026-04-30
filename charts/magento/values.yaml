@@ -152,6 +152,13 @@ gitSync:
   # restart (e.g. in real production deployments where git-sync is unused).
   reload:
     enabled: true
+    # When true, run setup:upgrade + setup:di:compile on every rotation.
+    # Required for plugin pushes that change the DI graph (new constructor
+    # deps, new di.xml preferences) or DB schema (db_schema.xml). Adds
+    # ~30-60s of in-pod work per rotation. Default false to preserve the
+    # current fast-reload behaviour for consumers that only push template
+    # or static content.
+    compile: false
     # Sleep before the watcher's first poll, after setup.sh forks it.
     # Gives setup.sh time to finish its own final cache:flush / apachectl.
     initialDelaySeconds: 30
