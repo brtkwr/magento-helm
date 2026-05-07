@@ -353,15 +353,42 @@ data:
     # `deploy:mode:set ... --skip-compilation` leaves adminhtml serving stale
     # assets after upgrades. Frontend is often handled by a Hyva tailwind npm
     # build in postSetup, but running it here for both areas is safe (idempotent).
-    {{- range .Values.staticContentDeploy.areas }}
-    echo "Deploying static content for area={{ . }} locales: {{ join " " $.Values.staticContentDeploy.locales }}..."
-    mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }} || true
-    {{- end }}
-    # Toggle dev/static/sign so rendered /static/ URLs include /version<ts>/...
-    # — needed for safe long-cache CDN rules. Disabling reverts to unsigned URLs.
-    mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }} || true
-    mage cache:flush || true
-    fix_permissions
+    #
+    # Doubles as the self-heal path: a livenessProbe that checks for
+    # deployed_version.txt will restart the container if a previous rotation
+    # crashed mid-redeploy and left pub/static/ empty. postStart re-fires this
+    # script and the missing-marker branch below repopulates everything.
+    if [ ! -s /var/www/html/pub/static/deployed_version.txt ]; then
+      echo "deployed_version.txt missing — running static-content:deploy"
+      # Snapshot pub/static/ before purging so we can roll back if deploy
+      # itself crashes. .htaccess is the only thing the chart ships, so
+      # treat "only .htaccess present" as effectively empty.
+      sc_have_prev=false
+      if [ -d /var/www/html/pub/static ] \
+         && [ -n "$(ls -A /var/www/html/pub/static 2>/dev/null | grep -v '^\.htaccess$' || true)" ]; then
+        rsync -a --delete /var/www/html/pub/static/ /var/www/html/var/.pub-static-prev/ \
+          && sc_have_prev=true
+      fi
+      sc_failed=false
+      {{- range .Values.staticContentDeploy.areas }}
+      echo "Deploying static content for area={{ . }} locales: {{ join " " $.Values.staticContentDeploy.locales }}..."
+      if ! mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }}; then
+        echo "ERROR: static-content:deploy failed for area={{ . }}"
+        sc_failed=true
+      fi
+      {{- end }}
+      if $sc_failed && $sc_have_prev; then
+        echo "ALERT: rolling pub/static/ back to previous snapshot"
+        rsync -a --delete /var/www/html/var/.pub-static-prev/ /var/www/html/pub/static/ || true
+      fi
+      # Toggle dev/static/sign so rendered /static/ URLs include /version<ts>/...
+      # — needed for safe long-cache CDN rules. Disabling reverts to unsigned URLs.
+      mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }} || true
+      mage cache:flush || true
+      fix_permissions
+    else
+      echo "static content present (deployed_version.txt non-empty), skipping deploy"
+    fi
     {{- end }}
 
     # Resize catalog images for all stores/themes (must run after store creation).
@@ -386,6 +413,21 @@ data:
     # Markers were seeded in init-setup right after symlinks were created, so
     # any flip during init-setup's DI compile or this script's long postSetup
     # phase is reliably caught by the watcher's first poll.
+    #
+    # Concurrency model:
+    #   * markers are written *after* a verified-good rebuild, never before —
+    #     a failed rebuild leaves the marker on the previous SHA so the next
+    #     poll retries automatically. without this, a single transient failure
+    #     (php fatal during di:compile, fs race during -f purge) wedges the
+    #     pod on a half-built install with no self-recovery path.
+    #   * markers track the symlink target *as observed after* the rebuild,
+    #     not the SHA captured at detection time. so a burst of N pushes
+    #     during one rebuild collapses to one rebuild + one marker write
+    #     (the rebuild itself rsyncs from the live symlink, so it always
+    #     processes the latest SHA git-sync has materialised by then).
+    #   * flock serialises rebuilds within a single pod; if a rotation
+    #     lands while a rebuild is in flight, the watcher logs and retries
+    #     on the next poll.
     (
       sleep {{ .Values.gitSync.reload.initialDelaySeconds }}
       while true; do
@@ -400,14 +442,14 @@ data:
           previous=$(cat "$marker" 2>/dev/null || true)
           if [ "$previous" != "$current" ]; then
             echo "git-sync change detected for ${name}: ${previous:-<none>} -> ${current}"
-            echo "$current" > "$marker"
             changed=true
             changed_names="$changed_names $name"
           fi
         done
         if $changed; then
-          # Refresh stable plugin paths from the new SHA before any cache /
-          # DI work — rsync writes per-file via temp+rename so concurrent
+          # Refresh stable plugin paths from the live symlink (which may have
+          # advanced past the SHA that triggered detection if more pushes
+          # have landed). rsync writes per-file via temp+rename so concurrent
           # requests never see partial files, and Magento's realpath-cached
           # entries (rooted at /var/www/html/plugins/<name>/) stay valid.
           for name in $changed_names; do
@@ -419,10 +461,19 @@ data:
           # the same sequence cold-start does so the running pod picks them
           # up without a kubectl rollout restart. flock serialises rebuilds
           # so a fast burst of rotations doesn't race itself.
+          rebuild_ok=false
           (
-            flock -n 9 || { echo "rotation rebuild already in flight, skipping"; exit 0; }
+            flock -n 9 || { echo "rotation rebuild already in flight, skipping"; exit 2; }
+            set -euo pipefail
+            trap 'echo "ERROR: rotation rebuild failed at line $LINENO with exit $?"' ERR
+            {{- if eq .Values.magento.mode "production" }}
+            # Snapshot pub/static/ before -f purges it. Restored on smoke
+            # failure so the storefront keeps serving the previous (stale
+            # but functional) bundle instead of 500ing on missing assets.
+            rsync -a --delete /var/www/html/pub/static/ /var/www/html/var/.pub-static-prev/ || true
+            {{- end }}
             mage setup:upgrade
-            rm -rf generated/code/* generated/metadata
+            rm -rf generated/code/* generated/metadata 2>/dev/null || true
             mage setup:di:compile
             {{- if eq .Values.magento.mode "production" }}
             {{- range .Values.staticContentDeploy.areas }}
@@ -435,29 +486,81 @@ data:
             sleep 2
             smoke=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/health_check.php || echo "000")
             if [ "$smoke" != "200" ]; then
-              echo "ALERT: post-rotation smoke failed: HTTP $smoke"
+              echo "ALERT: post-rotation smoke failed: HTTP $smoke — rolling back"
+              {{- if eq .Values.magento.mode "production" }}
+              if [ -d /var/www/html/var/.pub-static-prev ]; then
+                rsync -a --delete /var/www/html/var/.pub-static-prev/ /var/www/html/pub/static/ || true
+                apachectl -k graceful || true
+              fi
+              {{- end }}
+              exit 1
             fi
             echo "git-sync auto-reload (full rebuild) complete"
-          ) 9>/var/www/html/var/.gitsync-rebuild.lock
+          ) 9>/var/www/html/var/.gitsync-rebuild.lock && rebuild_ok=true
+          if $rebuild_ok; then
+            # Read the symlink *now* — burst pushes during the rebuild may
+            # have advanced it past the SHA we detected. The rebuild rsynced
+            # from the live symlink so it already incorporated those pushes;
+            # writing the post-rebuild SHA collapses the burst into a single
+            # marker write and prevents a spurious follow-up rebuild.
+            for name in $changed_names; do
+              final=$(readlink -f "/var/www/html/git-sync/${name}/code" 2>/dev/null || true)
+              if [ -n "$final" ]; then
+                echo "$final" > "/var/www/html/var/.gitsync-${name}-head"
+              fi
+            done
+          else
+            echo "rotation rebuild not committed; markers left at previous SHAs for retry on next poll"
+          fi
           {{- else }}
-          {{- if .Values.staticContentDeploy.enabled }}
-          # Re-deploy static content from the new SHA. Materialises real files
-          # (no symlinks) so the new plugin assets are served immediately and
-          # don't depend on git-sync worktree paths that may be pruned later.
-          {{- range .Values.staticContentDeploy.areas }}
-          mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }} || true
-          {{- end }}
-          {{- else }}
-          # Static-content-deploy disabled: clear lazy-generated artefacts so
-          # the next request regenerates them (as symlinks in developer mode)
-          # against the new SHA. Keeps DI cache in sync with whatever the
-          # plugin's di.xml / events.xml define.
-          rm -rf {{ join " " .Values.gitSync.reload.developerClearPaths }} 2>/dev/null || true
-          {{- end }}
-          mage cache:flush || true
-          fix_permissions
-          apachectl -k graceful || true
-          echo "git-sync auto-reload complete"
+          fast_ok=false
+          (
+            set -euo pipefail
+            trap 'echo "ERROR: rotation fast-reload failed at line $LINENO with exit $?"' ERR
+            {{- if .Values.staticContentDeploy.enabled }}
+            # Re-deploy static content from the new SHA. Materialises real files
+            # (no symlinks) so the new plugin assets are served immediately and
+            # don't depend on git-sync worktree paths that may be pruned later.
+            rsync -a --delete /var/www/html/pub/static/ /var/www/html/var/.pub-static-prev/ || true
+            {{- range .Values.staticContentDeploy.areas }}
+            mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }}
+            {{- end }}
+            {{- else }}
+            # Static-content-deploy disabled: clear lazy-generated artefacts so
+            # the next request regenerates them (as symlinks in developer mode)
+            # against the new SHA. Keeps DI cache in sync with whatever the
+            # plugin's di.xml / events.xml define.
+            rm -rf {{ join " " .Values.gitSync.reload.developerClearPaths }} 2>/dev/null || true
+            {{- end }}
+            mage cache:flush || true
+            fix_permissions
+            apachectl -k graceful || true
+            sleep 2
+            smoke=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/health_check.php || echo "000")
+            if [ "$smoke" != "200" ]; then
+              echo "ALERT: post-rotation smoke failed: HTTP $smoke — rolling back"
+              {{- if .Values.staticContentDeploy.enabled }}
+              if [ -d /var/www/html/var/.pub-static-prev ]; then
+                rsync -a --delete /var/www/html/var/.pub-static-prev/ /var/www/html/pub/static/ || true
+                apachectl -k graceful || true
+              fi
+              {{- end }}
+              exit 1
+            fi
+            echo "git-sync auto-reload complete"
+          ) && fast_ok=true
+          if $fast_ok; then
+            # Read the symlink *now* (post-reload) so burst pushes that
+            # landed during the reload coalesce into a single marker write.
+            for name in $changed_names; do
+              final=$(readlink -f "/var/www/html/git-sync/${name}/code" 2>/dev/null || true)
+              if [ -n "$final" ]; then
+                echo "$final" > "/var/www/html/var/.gitsync-${name}-head"
+              fi
+            done
+          else
+            echo "rotation fast-reload not committed; markers left at previous SHAs for retry on next poll"
+          fi
           {{- end }}
         fi
         sleep {{ .Values.gitSync.reload.pollIntervalSeconds }}
