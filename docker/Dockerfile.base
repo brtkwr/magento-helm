@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     curl \
     cron \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure and install PHP extensions
