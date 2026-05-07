@@ -19,18 +19,32 @@ data:
 
     fix_permissions() {
       echo "Fixing permissions..."
-      chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ 2>/dev/null || true
+      chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ plugins/ 2>/dev/null || true
       chmod -R 775 var/ generated/ 2>/dev/null || true
     }
 
     {{- if .Values.gitSync.plugins }}
-    # Create symlinks for git-sync plugins
-    echo "Setting up git-sync plugin symlinks..."
+    # Materialise git-sync plugins to a stable, non-rotating path.
+    #
+    # PHP's __DIR__ resolves through symlinks at include time, so registering
+    # a module via a symlink that targets git-sync's SHA-named worktree
+    # (.worktrees/<sha>/) bakes the SHA into Magento's config cache and
+    # compiled DI metadata. When git-sync rotates and prunes the old
+    # worktree, every cached path 500s with "module.xml file can't be read".
+    #
+    # Fix: rsync the worktree contents into /var/www/html/plugins/<name>/
+    # (a real directory whose path never changes) and point app/code/...
+    # at that. realpath() now resolves to the stable path; rotations only
+    # need to refresh contents, not paths.
+    echo "Materialising git-sync plugins to stable paths..."
+    mkdir -p /var/www/html/plugins
     {{- range .Values.gitSync.plugins }}
+    mkdir -p /var/www/html/plugins/{{ .name }}
+    rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/ /var/www/html/plugins/{{ .name }}/
     mkdir -p $(dirname /var/www/html/{{ .path }})
     rm -rf /var/www/html/{{ .path }}
-    ln -sf /var/www/html/git-sync/{{ .name }}/code /var/www/html/{{ .path }}
-    echo "Symlink: {{ .path }} -> git-sync/{{ .name }}/code"
+    ln -sf /var/www/html/plugins/{{ .name }} /var/www/html/{{ .path }}
+    echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}"
     {{- end }}
 
     # Seed git-sync markers immediately after symlinks land. Captures the
@@ -232,7 +246,7 @@ data:
     export -f mage
 
     fix_permissions() {
-      chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ 2>/dev/null || true
+      chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ plugins/ 2>/dev/null || true
       chmod -R 775 var/ generated/ 2>/dev/null || true
     }
 
@@ -262,13 +276,16 @@ data:
     export -f magento_config_set_store
 
     {{- if .Values.gitSync.plugins }}
-    # Ensure git-sync symlinks exist (in case init containers didn't run)
-    echo "Setting up git-sync plugin symlinks..."
+    # Ensure plugin materialisation + symlinks exist (in case init containers didn't run)
+    echo "Ensuring git-sync plugin stable paths..."
+    mkdir -p /var/www/html/plugins
     {{- range .Values.gitSync.plugins }}
+    mkdir -p /var/www/html/plugins/{{ .name }}
+    rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/ /var/www/html/plugins/{{ .name }}/
     mkdir -p $(dirname /var/www/html/{{ .path }})
     rm -rf /var/www/html/{{ .path }}
-    ln -sfn /var/www/html/git-sync/{{ .name }}/code /var/www/html/{{ .path }}
-    echo "Symlink: {{ .path }} -> git-sync/{{ .name }}/code"
+    ln -sfn /var/www/html/plugins/{{ .name }} /var/www/html/{{ .path }}
+    echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}"
     {{- end }}
     {{- end }}
 
@@ -373,6 +390,7 @@ data:
       sleep {{ .Values.gitSync.reload.initialDelaySeconds }}
       while true; do
         changed=false
+        changed_names=""
         for link in /var/www/html/git-sync/*/code; do
           [ -L "$link" ] || continue
           name=$(basename "$(dirname "$link")")
@@ -384,9 +402,17 @@ data:
             echo "git-sync change detected for ${name}: ${previous:-<none>} -> ${current}"
             echo "$current" > "$marker"
             changed=true
+            changed_names="$changed_names $name"
           fi
         done
         if $changed; then
+          # Refresh stable plugin paths from the new SHA before any cache /
+          # DI work — rsync writes per-file via temp+rename so concurrent
+          # requests never see partial files, and Magento's realpath-cached
+          # entries (rooted at /var/www/html/plugins/<name>/) stay valid.
+          for name in $changed_names; do
+            rsync -aL --delete "/var/www/html/git-sync/${name}/code/" "/var/www/html/plugins/${name}/"
+          done
           {{- if .Values.gitSync.reload.compile }}
           # Full rebuild path: rotation included DI/schema-affecting changes
           # (new di.xml preferences, constructor deps, or db_schema.xml). Run
