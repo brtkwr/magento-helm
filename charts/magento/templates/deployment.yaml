@@ -233,12 +233,25 @@ spec:
             periodSeconds: {{ .Values.healthCheck.periodSeconds }}
             timeoutSeconds: {{ .Values.healthCheck.timeoutSeconds }}
             failureThreshold: {{ .Values.healthCheck.failureThreshold }}
+          # Liveness checks PHP/Apache health *and* (when staticContentDeploy
+          # is enabled in production mode) that pub/static/deployed_version.txt
+          # exists. health_check.php alone returns 200 even when pub/static/
+          # has been wiped by a crashed git-sync rotation, which makes the
+          # failure invisible to kubelet — the pod stays "ready" while every
+          # page 500s. Escalating that broken state to a container restart
+          # lets postStart's missing-marker branch re-run static-content:deploy
+          # and recover without manual intervention.
           livenessProbe:
-            httpGet:
-              path: /health_check.php
-              port: http
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  curl -fsS -o /dev/null --max-time 5 http://127.0.0.1/health_check.php{{ if and .Values.staticContentDeploy.enabled (eq .Values.magento.mode "production") }} \
+                    && [ -s /var/www/html/pub/static/deployed_version.txt ]{{ end }}
             periodSeconds: 30
             timeoutSeconds: 10
+            failureThreshold: 4
           resources:
             {{- toYaml .Values.resources.magento | nindent 12 }}
 
