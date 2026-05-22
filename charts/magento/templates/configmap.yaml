@@ -122,6 +122,11 @@ data:
       echo "Sample data styles.css restored to pub/media/"
     fi
 
+    # Hand off any root-owned marker files (gitsync-*-head, needs-catalog-resize)
+    # to www-data before setup:install runs as that user — its pre-flight
+    # File permissions check refuses to start otherwise.
+    fix_permissions
+
     # Check if Magento is already installed
     if [ -f app/etc/env.php ]; then
       echo "=== UPGRADE PATH ==="
