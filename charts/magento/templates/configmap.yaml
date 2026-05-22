@@ -40,11 +40,11 @@ data:
     mkdir -p /var/www/html/plugins
     {{- range .Values.gitSync.plugins }}
     mkdir -p /var/www/html/plugins/{{ .name }}
-    rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/ /var/www/html/plugins/{{ .name }}/
+    rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/{{ with .sourcePath }}{{ . }}/{{ end }} /var/www/html/plugins/{{ .name }}/
     mkdir -p $(dirname /var/www/html/{{ .path }})
     rm -rf /var/www/html/{{ .path }}
     ln -sf /var/www/html/plugins/{{ .name }} /var/www/html/{{ .path }}
-    echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}"
+    echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}{{ with .sourcePath }} (from subpath {{ . }}){{ end }}"
     {{- end }}
 
     # Seed git-sync markers immediately after symlinks land. Captures the
@@ -281,11 +281,11 @@ data:
     mkdir -p /var/www/html/plugins
     {{- range .Values.gitSync.plugins }}
     mkdir -p /var/www/html/plugins/{{ .name }}
-    rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/ /var/www/html/plugins/{{ .name }}/
+    rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/{{ with .sourcePath }}{{ . }}/{{ end }} /var/www/html/plugins/{{ .name }}/
     mkdir -p $(dirname /var/www/html/{{ .path }})
     rm -rf /var/www/html/{{ .path }}
     ln -sfn /var/www/html/plugins/{{ .name }} /var/www/html/{{ .path }}
-    echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}"
+    echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}{{ with .sourcePath }} (from subpath {{ . }}){{ end }}"
     {{- end }}
     {{- end }}
 
@@ -430,6 +430,12 @@ data:
     #     on the next poll.
     (
       sleep {{ .Values.gitSync.reload.initialDelaySeconds }}
+      # name -> sourcePath subdir within each plugin's git-sync checkout
+      # (empty string means materialise from the repo root).
+      declare -A GITSYNC_SOURCE_PATHS
+      {{- range .Values.gitSync.plugins }}
+      GITSYNC_SOURCE_PATHS[{{ .name }}]={{ .sourcePath | default "" | quote }}
+      {{- end }}
       while true; do
         changed=false
         changed_names=""
@@ -453,7 +459,8 @@ data:
           # requests never see partial files, and Magento's realpath-cached
           # entries (rooted at /var/www/html/plugins/<name>/) stay valid.
           for name in $changed_names; do
-            rsync -aL --delete "/var/www/html/git-sync/${name}/code/" "/var/www/html/plugins/${name}/"
+            sp="${GITSYNC_SOURCE_PATHS[$name]:-}"
+            rsync -aL --delete "/var/www/html/git-sync/${name}/code/${sp:+${sp}/}" "/var/www/html/plugins/${name}/"
           done
           {{- if .Values.gitSync.reload.compile }}
           # Full rebuild path: rotation included DI/schema-affecting changes
