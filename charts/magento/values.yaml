@@ -142,6 +142,11 @@ gitSync:
   #     branch: main
   #     path: app/code/YourVendor/Module
   #     private: false  # set to true for private repos (uses credentials.token)
+  #     # Optional subpath within the repo to materialise into the symlink
+  #     # target. Useful when a single repo holds multiple modules at
+  #     # different roots (e.g. a monorepo with `plugin/` and `hyva/` at the
+  #     # top level). Omit or leave empty to materialise from the repo root.
+  #     # sourcePath: plugin
 
   # Auto-reload Magento when git-sync pulls a new SHA on any plugin branch.
   # On every change detection, the watcher runs a mode-appropriate reload:
