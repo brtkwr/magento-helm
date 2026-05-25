@@ -64,13 +64,20 @@ hooks:
   postInstall: ""
   # Runs after all setup completes (both paths) - use for config, stores, etc.
   postSetup: ""
+  # Hooks run as root in setup.sh. Use the chart-provided `mage` wrapper
+  # for any bin/magento invocation so cache writes land owned by www-data;
+  # raw `bin/magento ...` calls bootstrap Magento as root and leave
+  # root-owned files in var/cache that later 500 php-fpm requests.
+  # (As a safety net the chart trap-runs fix_permissions on exit, but the
+  # right convention is still to drop privs at the call site.)
+  #
   # Example:
   # hooks:
   #   postUpgrade: |
-  #     bin/magento admin:user:create --admin-user=admin ... || true
+  #     mage admin:user:create --admin-user=admin ... || true
   #   postSetup: |
-  #     bin/magento store:create 'Hyva Checkout' hyva || true
-  #     bin/magento config:set payment/two_payment/active 1 || true
+  #     mage store:create 'Hyva Checkout' hyva || true
+  #     mage config:set payment/two_payment/active 1 || true
 
 # DEPRECATED: Use hooks.postSetup instead
 postScript: ""
