@@ -23,6 +23,15 @@ data:
       chmod -R 775 var/ generated/ 2>/dev/null || true
     }
 
+    # Always run fix_permissions on exit, including on `set -e` aborts. Without
+    # this, any failure between the final fix_permissions and script end (e.g.
+    # a hook command without `|| true`) leaves whatever root-owned files were
+    # written by earlier root-mode bin/magento calls (e.g. when a hook author
+    # bypasses the `mage` wrapper). Those files break the next pod's runtime
+    # cache writes intermittently — the failure mode shows up as a 500 on a
+    # specific admin page rather than a clean restart-time error.
+    trap fix_permissions EXIT
+
     {{- if .Values.gitSync.plugins }}
     # Materialise git-sync plugins to a stable, non-rotating path.
     #
@@ -266,6 +275,16 @@ data:
       chown -R www-data:www-data var/ generated/ pub/static/ pub/media/ app/etc/ plugins/ 2>/dev/null || true
       chmod -R 775 var/ generated/ 2>/dev/null || true
     }
+
+    # Always run fix_permissions on exit, including on `set -e` aborts. Without
+    # this, a hook command without `|| true` (npm, php -r, etc.) can abort the
+    # script before the final fix_permissions call, leaving root-owned cache
+    # files written by earlier root-mode bin/magento invocations in the hook.
+    # The runtime symptom is a 500 on a specific admin page rather than a
+    # clean restart-time error: a www-data php-fpm worker calling
+    # describeTable() can't overwrite the root-owned DDL cache file and the
+    # warning gets escalated by the error handler.
+    trap fix_permissions EXIT
 
     # Helper: Set store-level config using Magento's ConfigWriter API
     # Usage: magento_config_set_store <store_code> <path> <value>
