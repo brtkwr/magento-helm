@@ -41,6 +41,18 @@ data:
     {{- range .Values.gitSync.plugins }}
     mkdir -p /var/www/html/plugins/{{ .name }}
     rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/{{ with .sourcePath }}{{ . }}/{{ end }} /var/www/html/plugins/{{ .name }}/
+    {{- if .sourcePath }}
+    # sourcePath narrows the rsync to a repo subdir, leaving the
+    # repo-root composer.json and worktree .git file behind. Copy
+    # them over so downstream tooling that reads module version /
+    # commit SHA from the deployed module dir (e.g. admin diagnostic
+    # widgets) finds them in the same place as the no-sourcePath
+    # layout. The .git file's gitdir: path is no longer resolvable
+    # post-copy, but its `worktrees/<sha>` segment — the only field
+    # consumers parse — is preserved verbatim.
+    cp -f /var/www/html/git-sync/{{ .name }}/code/composer.json /var/www/html/plugins/{{ .name }}/composer.json 2>/dev/null || true
+    cp -f /var/www/html/git-sync/{{ .name }}/code/.git /var/www/html/plugins/{{ .name }}/.git 2>/dev/null || true
+    {{- end }}
     mkdir -p $(dirname /var/www/html/{{ .path }})
     rm -rf /var/www/html/{{ .path }}
     ln -sf /var/www/html/plugins/{{ .name }} /var/www/html/{{ .path }}
@@ -287,6 +299,12 @@ data:
     {{- range .Values.gitSync.plugins }}
     mkdir -p /var/www/html/plugins/{{ .name }}
     rsync -aL --delete /var/www/html/git-sync/{{ .name }}/code/{{ with .sourcePath }}{{ . }}/{{ end }} /var/www/html/plugins/{{ .name }}/
+    {{- if .sourcePath }}
+    # Mirror init-setup.sh: bring repo-root composer.json + .git
+    # over when sourcePath narrowed the rsync to a subdir.
+    cp -f /var/www/html/git-sync/{{ .name }}/code/composer.json /var/www/html/plugins/{{ .name }}/composer.json 2>/dev/null || true
+    cp -f /var/www/html/git-sync/{{ .name }}/code/.git /var/www/html/plugins/{{ .name }}/.git 2>/dev/null || true
+    {{- end }}
     mkdir -p $(dirname /var/www/html/{{ .path }})
     rm -rf /var/www/html/{{ .path }}
     ln -sfn /var/www/html/plugins/{{ .name }} /var/www/html/{{ .path }}
@@ -466,6 +484,15 @@ data:
           for name in $changed_names; do
             sp="${GITSYNC_SOURCE_PATHS[$name]:-}"
             rsync -aL --delete "/var/www/html/git-sync/${name}/code/${sp:+${sp}/}" "/var/www/html/plugins/${name}/"
+            if [ -n "$sp" ]; then
+              # sourcePath layout: rsync narrowed to a subdir, so the
+              # repo-root composer.json and worktree .git file didn't
+              # travel. Mirror init-setup.sh: copy them so the deployed
+              # module dir always has the metadata downstream tooling
+              # expects (see init-setup.sh for the longer rationale).
+              cp -f "/var/www/html/git-sync/${name}/code/composer.json" "/var/www/html/plugins/${name}/composer.json" 2>/dev/null || true
+              cp -f "/var/www/html/git-sync/${name}/code/.git" "/var/www/html/plugins/${name}/.git" 2>/dev/null || true
+            fi
           done
           {{- if .Values.gitSync.reload.compile }}
           # Full rebuild path: rotation included DI/schema-affecting changes
