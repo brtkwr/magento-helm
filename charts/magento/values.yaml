@@ -116,6 +116,61 @@ opensearch:
   storage: 5Gi
   javaOpts: "-Xms512m -Xmx512m"
 
+# Redis sidecar — backs cache.default, cache.page_cache, and session.
+# Without this, Magento defaults to filesystem backends with no eviction
+# policy, and var/page_cache fills the PVC over time → SessionHandler
+# write failures → admin 500s.
+#
+# Pod-local only. The chart hardcodes the Redis host to 127.0.0.1 in
+# the template — there is intentionally no `host` knob and no
+# `password` / `tls` support, so this chart cannot point at an
+# external managed Redis (Memorystore, ElastiCache, etc.). The sidecar
+# model exists to escape filesystem-backed cache; a managed-Redis
+# story is a separate piece of design work.
+#
+# Cache is ephemeral (no persistence). Pod restart = empty cache for
+# `cache.default` and `cache.page_cache` (both regenerable), and =
+# all-users-logged-out for `session` (acceptable trade-off vs the
+# pre-PR filesystem behaviour, which also lost sessions on the same
+# PVC that filled up). A `persistence.enabled` knob defaulting to off
+# could be added later if session continuity across restarts becomes
+# important — sessions would migrate to a small dedicated PVC, leaving
+# cache.* ephemeral.
+#
+# **Existing-deployment caveat.** Flipping `redis.enabled` from false →
+# true does NOT clean up the old filesystem backends — Magento simply
+# stops writing to them, but `var/page_cache/`, `var/cache/`, and
+# `var/session/` keep their existing contents on the PVC forever. The
+# very pollution this chart change escapes from persists until you
+# manually clear those directories. See README "Switching an existing
+# release from filesystem to Redis cache" for the cleanup recipe.
+redis:
+  enabled: true
+  image: redis
+  tag: "7.4-alpine"
+  port: 6379
+  # Eviction. allkeys-lru drops the least-recently-used keys when memory is
+  # exhausted. Avoids a wedged pod if the cache hot set ever exceeds maxmemory.
+  #
+  # 256mb is comfortable for dev/staging where the catalog is small and
+  # traffic is low. Production storefronts churn through FPC entries
+  # fast (one per URL × customer-group × currency × store-view) and
+  # will hit LRU eviction sooner than they should at this size —
+  # consider bumping to 1gb+ for prod workloads.
+  maxmemory: "256mb"
+  maxmemoryPolicy: "allkeys-lru"
+  # Magento conventionally splits its three Redis uses across separate DBs
+  # so a session flush doesn't blow away the cache (and vice versa).
+  databases:
+    default: 0
+    pageCache: 1
+    session: 2
+  session:
+    # Magento's session-save Redis log level: 0 (debug) … 7 (emergency).
+    # 3 = LOG_ERR matches the upstream default for prod. Lift to 1
+    # (LOG_ALERT) only when chasing session-handler bugs.
+    logLevel: 3
+
 # Persistence
 persistence:
   enabled: true
@@ -211,6 +266,13 @@ resources:
     limits:
       memory: "2Gi"
       cpu: "1000m"
+  redis:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "384Mi"
+      cpu: "500m"
 
 # Health checks
 healthCheck:
