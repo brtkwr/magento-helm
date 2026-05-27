@@ -32,6 +32,38 @@ data:
     # specific admin page rather than a clean restart-time error.
     trap fix_permissions EXIT
 
+    {{- if .Values.redis.enabled }}
+    # Wire app/etc/env.php to use the Redis sidecar for cache.default,
+    # cache.page_cache, and session. Idempotent — setup:config:set just
+    # rewrites the relevant keys in env.php. Used by the UPGRADE path
+    # below to realign env.php with values.yaml on every restart. The
+    # FRESH-INSTALL path bypasses this function and folds the same
+    # flags directly into setup:install so the install itself runs
+    # against Redis from line 1 (no filesystem-cache → Redis switch
+    # mid-install).
+    #
+    # Redis is sidecar-local, so the host is unconditionally 127.0.0.1
+    # — this chart does not support external Redis (no password / tls
+    # knobs). See values.yaml redis: block for the design note.
+    configure_redis_backends() {
+      echo "Configuring Redis backends in env.php..."
+      mage setup:config:set --no-interaction \
+        --cache-backend=redis \
+        --cache-backend-redis-server=127.0.0.1 \
+        --cache-backend-redis-port={{ .Values.redis.port }} \
+        --cache-backend-redis-db={{ .Values.redis.databases.default }} \
+        --page-cache=redis \
+        --page-cache-redis-server=127.0.0.1 \
+        --page-cache-redis-port={{ .Values.redis.port }} \
+        --page-cache-redis-db={{ .Values.redis.databases.pageCache }} \
+        --session-save=redis \
+        --session-save-redis-host=127.0.0.1 \
+        --session-save-redis-port={{ .Values.redis.port }} \
+        --session-save-redis-db={{ .Values.redis.databases.session }} \
+        --session-save-redis-log-level={{ .Values.redis.session.logLevel }}
+    }
+    {{- end }}
+
     {{- if .Values.gitSync.plugins }}
     # Materialise git-sync plugins to a stable, non-rotating path.
     #
@@ -116,6 +148,28 @@ data:
     done
     {{- end }}
 
+    {{- if .Values.redis.enabled }}
+    # Wait for Redis (sidecar should be ready). Required before
+    # setup:upgrade / setup:install — both bootstrap the cache layer and
+    # will fail-fast if env.php points at an unreachable backend.
+    echo "Waiting for Redis..."
+    for i in $(seq 1 30); do
+      # Bash /dev/tcp probe — avoids depending on redis-cli being in the
+      # magento image. A successful connection means Redis is accepting
+      # clients; setup:config:set only writes env.php, the actual PING
+      # round-trips happen later when Magento boots its cache layer.
+      if (echo > /dev/tcp/{{ .Values.redis.host }}/{{ .Values.redis.port }}) 2>/dev/null; then
+        echo "Redis is ready"
+        break
+      fi
+      if [ $i -eq 30 ]; then
+        echo "ERROR: Redis not ready after 30 attempts"
+        exit 1
+      fi
+      sleep 2
+    done
+    {{- end }}
+
     # Restore sample-data-media if missing (idempotent via cp -n).
     # Runs for both install and upgrade paths so PVCs that lost their media
     # (or were created before this copy block existed) can recover without a
@@ -158,6 +212,17 @@ data:
 
       # Backup env.php before upgrade
       cp app/etc/env.php app/etc/env.php.bak
+
+      {{- if .Values.redis.enabled }}
+      # Re-assert Redis backends in env.php before setup:upgrade. The
+      # upgrade reads cache config, so any drift from values.yaml needs
+      # to land here and not after.
+      configure_redis_backends || {
+        echo "configure_redis_backends failed, restoring env.php backup"
+        cp app/etc/env.php.bak app/etc/env.php
+        exit 1
+      }
+      {{- end }}
 
       echo "Running setup:upgrade..."
       mage setup:upgrade || {
@@ -239,8 +304,31 @@ data:
         {{- if .Values.opensearch.enabled }}
         --search-engine='opensearch' \
         --opensearch-host='127.0.0.1' \
-        --opensearch-port='9200'
+        --opensearch-port='9200' \
         {{- end }}
+        {{- if .Values.redis.enabled }}
+        --cache-backend=redis \
+        --cache-backend-redis-server=127.0.0.1 \
+        --cache-backend-redis-port={{ .Values.redis.port }} \
+        --cache-backend-redis-db={{ .Values.redis.databases.default }} \
+        --page-cache=redis \
+        --page-cache-redis-server=127.0.0.1 \
+        --page-cache-redis-port={{ .Values.redis.port }} \
+        --page-cache-redis-db={{ .Values.redis.databases.pageCache }} \
+        --session-save=redis \
+        --session-save-redis-host=127.0.0.1 \
+        --session-save-redis-port={{ .Values.redis.port }} \
+        --session-save-redis-db={{ .Values.redis.databases.session }} \
+        --session-save-redis-log-level={{ .Values.redis.session.logLevel }} \
+        {{- end }}
+        --no-interaction
+
+      # Note: Redis backends (when redis.enabled) are wired in directly
+      # via setup:install above — no separate configure_redis_backends
+      # call is needed on the fresh-install path. This avoids
+      # setup:install populating the filesystem cache before the switch
+      # to Redis, stranding cache entries on the now-unused filesystem
+      # path.
 
       # Disable 2FA for development
       mage module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true

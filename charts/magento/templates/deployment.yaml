@@ -73,6 +73,40 @@ spec:
           resources:
             {{- toYaml .Values.resources.database | nindent 12 }}
 
+        {{- if .Values.redis.enabled }}
+        # Phase 2: Native sidecar - Redis (K8s 1.28+)
+        # Backs cache.default, cache.page_cache, and session — wired into
+        # env.php on fresh-install (setup:install flags) and re-asserted
+        # on every upgrade (configure_redis_backends in init-setup.sh).
+        # No persistence, no Service: cache is ephemeral and reachable
+        # only from this pod's localhost.
+        #
+        # Declared BEFORE opensearch on purpose: native sidecars start
+        # sequentially in declaration order, and downstream regular
+        # initContainers gate on each sidecar becoming ready. Redis
+        # starts in <1s; opensearch needs several seconds to bind ports
+        # and load the security plugin. Putting redis first means
+        # init-setup is unblocked on redis as soon as it's up, in
+        # parallel with opensearch warming.
+        - name: redis
+          restartPolicy: Always
+          image: "{{ .Values.redis.image }}:{{ .Values.redis.tag }}"
+          args:
+            - --maxmemory
+            - {{ .Values.redis.maxmemory | quote }}
+            - --maxmemory-policy
+            - {{ .Values.redis.maxmemoryPolicy | quote }}
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+          resources:
+            {{- toYaml .Values.resources.redis | nindent 12 }}
+        {{- end }}
+
         {{- if .Values.opensearch.enabled }}
         # Phase 2: Native sidecar - OpenSearch (K8s 1.28+)
         - name: opensearch
