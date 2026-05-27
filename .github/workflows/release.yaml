@@ -116,7 +116,9 @@ jobs:
 
       - name: Update chart version
         run: |
+          app_version=$(yq '.image.tag' charts/magento/values.yaml)
           sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" charts/magento/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${app_version}\"/" charts/magento/Chart.yaml
 
       - name: Package chart
         run: helm package charts/magento

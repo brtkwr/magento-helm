@@ -2,8 +2,10 @@ apiVersion: v2
 name: magento
 description: Magento 2.4.x on Kubernetes with git-sync for live plugin development
 type: application
-version: 0.18.8
-appVersion: "2.4.8"
+# version and appVersion are placeholders; both are stamped at publish time
+# (version from the git tag, appVersion from image.tag in values.yaml).
+version: 0.0.0
+appVersion: ""
 home: https://github.com/brtkwr/magento-helm
 sources:
   - https://github.com/brtkwr/magento-helm
