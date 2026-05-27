@@ -260,15 +260,50 @@ data:
       touch /var/www/html/var/.fresh-install
     fi
 
-    # Sync all admin users (idempotent)
+    # Ensure admin users exist (idempotent).
+    #
+    # `bin/magento admin:user:create` is NOT a no-op when the user already
+    # exists — in Magento 2.4.x it upserts and resets the password to the
+    # value supplied. Calling it unconditionally on every pod restart means
+    # any password reset performed via the admin UI is reverted to the
+    # secret-backed default on the next rollout (see ABN-419). Probe the
+    # admin_user table directly via Magento's bootstrap and only invoke
+    # create for genuinely missing users. The DB probe is reliable across
+    # Magento versions; matching on CLI error strings is not.
     echo "Syncing admin users..."
+    admin_user_exists() {
+      local user="$1"
+      runuser -u www-data -- php -r "
+        require '/var/www/html/app/bootstrap.php';
+        \$b = Magento\Framework\App\Bootstrap::create(BP, \$_SERVER);
+        \$conn = \$b->getObjectManager()
+          ->get(Magento\Framework\App\ResourceConnection::class)
+          ->getConnection();
+        \$n = (int)\$conn->fetchOne(
+          'SELECT COUNT(*) FROM admin_user WHERE username = ?',
+          ['$user']
+        );
+        echo \$n > 0 ? 'yes' : 'no';
+      " 2>/dev/null
+    }
     {{- range $i, $user := .Values.adminUsers }}
-    mage admin:user:create \
-      --admin-firstname='{{ $user.firstname }}' \
-      --admin-lastname='{{ $user.lastname }}' \
-      --admin-email='{{ $user.email }}' \
-      --admin-user='{{ $user.username }}' \
-      --admin-password="${ADMIN_PASSWORD_{{ $i }}}" || true
+    case "$(admin_user_exists '{{ $user.username }}')" in
+      yes)
+        echo "[ADMIN] {{ $user.username }} already exists; leaving password alone"
+        ;;
+      no)
+        echo "[ADMIN] {{ $user.username }} does not exist; creating"
+        mage admin:user:create \
+          --admin-firstname='{{ $user.firstname }}' \
+          --admin-lastname='{{ $user.lastname }}' \
+          --admin-email='{{ $user.email }}' \
+          --admin-user='{{ $user.username }}' \
+          --admin-password="${ADMIN_PASSWORD_{{ $i }}}" || true
+        ;;
+      *)
+        echo "[ADMIN] probe for {{ $user.username }} failed; skipping create to avoid clobbering an existing user"
+        ;;
+    esac
     {{- end }}
 
     fix_permissions
