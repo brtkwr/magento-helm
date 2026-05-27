@@ -158,7 +158,7 @@ data:
       # magento image. A successful connection means Redis is accepting
       # clients; setup:config:set only writes env.php, the actual PING
       # round-trips happen later when Magento boots its cache layer.
-      if (echo > /dev/tcp/{{ .Values.redis.host }}/{{ .Values.redis.port }}) 2>/dev/null; then
+      if (echo > /dev/tcp/127.0.0.1/{{ .Values.redis.port }}) 2>/dev/null; then
         echo "Redis is ready"
         break
       fi
