@@ -545,6 +545,7 @@ data:
             flock -n 9 || { echo "rotation rebuild already in flight, skipping"; exit 2; }
             set -euo pipefail
             trap 'echo "ERROR: rotation rebuild failed at line $LINENO with exit $?"' ERR
+            trap fix_permissions EXIT
             {{- if eq .Values.magento.mode "production" }}
             # Snapshot pub/static/ before -f purges it. Restored on smoke
             # failure so the storefront keeps serving the previous (stale
@@ -596,6 +597,7 @@ data:
           (
             set -euo pipefail
             trap 'echo "ERROR: rotation fast-reload failed at line $LINENO with exit $?"' ERR
+            trap fix_permissions EXIT
             {{- if .Values.staticContentDeploy.enabled }}
             # Re-deploy static content from the new SHA. Materialises real files
             # (no symlinks) so the new plugin assets are served immediately and
