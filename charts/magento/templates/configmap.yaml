@@ -68,18 +68,10 @@ data:
     echo "Symlink: {{ .path }} -> /var/www/html/plugins/{{ .name }}{{ with .sourcePath }} (from subpath {{ . }}){{ end }}"
     {{- end }}
 
-    # Capture current git-sync SHAs vs the markers left by the previous pod.
-    # Two purposes:
-    #   1) Decide whether setup:upgrade + di:compile are needed (fast-path).
-    #   2) Update the markers so the in-pod gitsync watcher picks up the
-    #      same baseline the rest of init-setup is about to build against.
-    #
-    # Marker files live in /var/www/html/var (PVC-backed under magento/var),
-    # so the previous pod's values survive a restart. A missing marker is
-    # treated as "rotation detected" — first boot, manual var/ clean, or any
-    # other reason the marker isn't present forces a full rebuild.
-    GITSYNC_ROTATED=false
-    GITSYNC_ROTATION_REASON=""
+    # Seed git-sync SHA markers so the in-pod gitsync watcher has a
+    # baseline to compare against for any rotation that lands after
+    # init-setup completes. Marker files live in /var/www/html/var
+    # (PVC-backed under magento/var) and survive pod restarts.
     declare -A GITSYNC_CURR
     for link in /var/www/html/git-sync/*/code; do
       [ -L "$link" ] || continue
@@ -87,19 +79,7 @@ data:
       current=$(readlink -f "$link" 2>/dev/null || true)
       [ -n "$current" ] || continue
       GITSYNC_CURR[$name]="$current"
-      marker="/var/www/html/var/.gitsync-${name}-head"
-      previous=$(cat "$marker" 2>/dev/null || true)
-      if [ -z "$previous" ]; then
-        GITSYNC_ROTATED=true
-        GITSYNC_ROTATION_REASON="no marker for ${name} (first boot or marker lost)"
-      elif [ "$previous" != "$current" ]; then
-        GITSYNC_ROTATED=true
-        GITSYNC_ROTATION_REASON="rotated ${name}: ${previous} -> ${current}"
-      fi
     done
-    # Write the markers after detection so a no-rotation pod still refreshes
-    # them (idempotent) and the gitsync watcher's first poll has a baseline
-    # to compare against for any rotation that lands while init-setup runs.
     for name in "${!GITSYNC_CURR[@]}"; do
       echo "${GITSYNC_CURR[$name]}" > "/var/www/html/var/.gitsync-${name}-head"
       echo "git-sync marker seeded for ${name}: ${GITSYNC_CURR[$name]}"
@@ -174,51 +154,7 @@ data:
     # Check if Magento is already installed
     if [ -f app/etc/env.php ]; then
 
-      # Fast-path: skip setup:upgrade + di:compile when no gitsync rotation
-      # has happened since the previous pod ran. Restarts triggered by a pod
-      # roll without a code change (e.g. a values-only config update, an
-      # unrelated platform-tools change, a node drain) currently spend ~80 s
-      # re-running setup:upgrade across ~200 modules and re-generating DI
-      # for a code tree that hasn't moved. The compiled output and
-      # registered schema are byte-identical at the end of that 80 s.
-      #
-      # Conditions for the fast-path (all must hold):
-      #   * INIT_FORCE_REBUILD is not set to "1" (escape hatch for operators).
-      #   * No gitsync source has rotated since the previous pod.
-      #   * generated/code is populated (interceptor classes exist on disk).
-      #   * pub/static/deployed_version.txt is non-empty (static content is
-      #     deployed; setup:static-content:deploy isn't needed).
-      #
-      # If any condition fails we fall through to the full UPGRADE PATH, so
-      # this is purely an opportunistic speedup. The full path remains the
-      # ground-truth correctness story.
-      fast_ok=true
-      fast_reason=""
-      if [ "${INIT_FORCE_REBUILD:-0}" = "1" ]; then
-        fast_ok=false
-        fast_reason="INIT_FORCE_REBUILD=1"
-      elif $GITSYNC_ROTATED; then
-        fast_ok=false
-        fast_reason="$GITSYNC_ROTATION_REASON"
-      elif [ ! -d generated/code ] || [ -z "$(find generated/code -maxdepth 1 -mindepth 1 -print -quit 2>/dev/null)" ]; then
-        fast_ok=false
-        fast_reason="generated/code empty"
-      elif [ ! -s pub/static/deployed_version.txt ]; then
-        fast_ok=false
-        fast_reason="pub/static/deployed_version.txt missing or empty"
-      fi
-
-      if $fast_ok; then
-        echo "=== FAST PATH (no gitsync rotation, build artefacts intact) ==="
-        # cache:flush is still essential: the PVC-persistent structure cache
-        # file from the previous pod (see ABN-415 long comment below) may
-        # have been written by a build that no longer matches what's on
-        # disk, so we always invalidate. Cheap (~3 s).
-        mage cache:flush || true
-        mage module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth || true
-        mage deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
-      else
-        echo "=== UPGRADE PATH (reason: ${fast_reason}) ==="
+      echo "=== UPGRADE PATH ==="
 
       # Backup env.php before upgrade
       cp app/etc/env.php app/etc/env.php.bak
@@ -278,7 +214,6 @@ data:
 
       # Set deploy mode
       mage deploy:mode:set {{ .Values.magento.mode }} --skip-compilation || true
-      fi  # close fast_ok if/else
 
     else
       echo "=== FRESH INSTALL ==="
