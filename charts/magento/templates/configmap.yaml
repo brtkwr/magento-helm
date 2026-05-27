@@ -172,6 +172,27 @@ data:
         exit 1
       }
 
+      # Flush all caches after di:compile (ABN-415 workaround).
+      #
+      # The structure-cache file at
+      #   var/cache/mage--*/mage---*_ADMINHTML__BACKEND_SYSTEM_CONFIGURATION_STRUCTURE
+      # is written into the `data` PVC under the `magento/var` subpath, so it
+      # persists across pod restarts. A previous pod that completed
+      # Reader::read without a brand-overlay synthesis plugin (e.g. because
+      # the plugin's DI metadata pointed at an older constructor signature)
+      # leaves a cache file that has the static abn_gateway tab but NO
+      # synthesised abn_payment / abn_general / abn_search / abn_version
+      # sections. The new pod inherits that cache, Scoped::_loadScopedData
+      # hits the cache on the first admin request, never calls Reader::read,
+      # and the synthesis plugin never fires for the pod's lifetime — the
+      # ABN admin tab disappears.
+      #
+      # Wiping after setup:di:compile guarantees that the next Reader::read
+      # picks up the freshly-deployed plugin set (and the freshly-compiled
+      # interceptors), with no PVC-borne stale data sitting in front of it.
+      # `bin/magento cache:flush` is cheap (~3 s) and idempotent.
+      mage cache:flush || true
+
       # Validate env.php has install date
       php -r "
         \$c = include 'app/etc/env.php';
