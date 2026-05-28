@@ -60,7 +60,8 @@ data:
         --session-save-redis-host=127.0.0.1 \
         --session-save-redis-port={{ .Values.redis.port }} \
         --session-save-redis-db={{ .Values.redis.databases.session }} \
-        --session-save-redis-log-level={{ .Values.redis.session.logLevel }}
+        --session-save-redis-log-level={{ .Values.redis.session.logLevel }} \
+        --session-save-redis-max-concurrency={{ .Values.redis.session.maxConcurrency }}
     }
     {{- end }}
 
@@ -320,6 +321,7 @@ data:
         --session-save-redis-port={{ .Values.redis.port }} \
         --session-save-redis-db={{ .Values.redis.databases.session }} \
         --session-save-redis-log-level={{ .Values.redis.session.logLevel }} \
+        --session-save-redis-max-concurrency={{ .Values.redis.session.maxConcurrency }} \
         {{- end }}
         --no-interaction
 

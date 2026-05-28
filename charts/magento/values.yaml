@@ -170,6 +170,15 @@ redis:
     # 3 = LOG_ERR matches the upstream default for prod. Lift to 1
     # (LOG_ALERT) only when chasing session-handler bugs.
     logLevel: 3
+    # Max number of PHP processes that may wait for a lock on a single
+    # session in Cm_RedisSession. Cm default is 6, which is too low
+    # for Hyva checkout interactions (chip-switch + parallel ajax can
+    # fire 6+ concurrent same-session requests and trip
+    # "Redis session exceeded concurrent connections"). 20 gives
+    # headroom without papering over genuine runaway parallel-request
+    # bugs. Per-session, not aggregate — so it does not scale with
+    # concurrent users on distinct sessions.
+    maxConcurrency: 20
 
 # Persistence
 persistence:
