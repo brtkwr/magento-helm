@@ -99,6 +99,34 @@ extraEnv: []
 #         name: my-secret
 #         key: api-key
 
+# Extra volumes and volume mounts for the `magento` runtime container.
+#
+# Standard Helm pattern for mounting additional volumes (emptyDir, ConfigMap,
+# Secret, CSI, etc.) into the magento container without forking the chart.
+#
+# Mounts are appended to the `magento` runtime container's volumeMounts
+# *after* the chart's `data` PVC mount, so paths under /var/www/html/var/
+# (which the chart subPath-mounts from the data PVC) can be overlaid with
+# an ephemeral volume. Kubelet processes volumeMounts in array order and
+# later mounts win for overlapping paths.
+#
+# Common use case — keep app debug logs off the persistent data PVC so a
+# misconfigured logger can't fill it and crash the pod:
+#
+#   extraVolumes:
+#     - name: magento-debug
+#       emptyDir:
+#         sizeLimit: 500Mi
+#   extraVolumeMounts:
+#     - name: magento-debug
+#       mountPath: /var/www/html/var/debug
+#
+# emptyDir lives on the node's local ephemeral disk, never grows beyond
+# `sizeLimit` (kubelet evicts the pod past the limit), and is wiped on
+# pod restart — perfect for transient log paths.
+extraVolumes: []
+extraVolumeMounts: []
+
 # Database (MariaDB sidecar)
 database:
   name: magento
