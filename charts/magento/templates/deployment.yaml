@@ -21,6 +21,7 @@ spec:
       labels:
         {{- include "magento.selectorLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "magento.serviceAccountName" . }}
       terminationGracePeriodSeconds: 120
       initContainers:
         # Phase 1: Directory setup + app/etc copy
