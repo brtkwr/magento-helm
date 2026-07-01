@@ -199,6 +199,9 @@ spec:
             - mountPath: /var/www/html/git-sync/{{ .name }}
               name: git-sync-{{ .name }}
             {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
 
       volumes:
         - name: data
