@@ -14,6 +14,20 @@ serviceAccount:
   name: ""
   annotations: {}
 
+# SecretProviderClass for the Secrets Store CSI driver (GKE/Secret
+# Manager). Create=true emits a SecretProviderClass; mount it via
+# extraVolumes (csi: secrets-store.csi.k8s.io referencing this name) so
+# the pod pulls secrets from SM instead of static k8s Secrets. Needs a
+# Workload-Identity-bound serviceAccount (see serviceAccount above).
+# `secrets` is the gcp provider's resourceName/path list; `secretObjects`
+# optionally syncs mounted files into a k8s Secret for env secretKeyRef.
+secretProviderClass:
+  create: false
+  name: ""
+  provider: gcp
+  secrets: []
+  secretObjects: []
+
 # Magento configuration
 magento:
   host: magento.example.com
