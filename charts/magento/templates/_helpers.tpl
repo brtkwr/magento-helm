@@ -58,3 +58,15 @@ Secret name - uses existingSecret if provided, otherwise uses fullname
 {{- include "magento.fullname" . }}
 {{- end }}
 {{- end }}
+
+{{/*
+ServiceAccount name — the provided name, else the fullname when created,
+else "default". Lets a pod run under a Workload-Identity-bound SA.
+*/}}
+{{- define "magento.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "magento.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
