@@ -248,13 +248,28 @@ ingress:
 # Git-sync sidecars for live plugin development
 # Each plugin gets its own git-sync container
 gitSync:
-  image: registry.k8s.io/git-sync/git-sync:v4.2.1
-  # Credentials for private repos (optional)
-  # Creates a secret with GitHub token for git-sync to use
+  # >= v4.3.0 required for GitHub App auth (credentials.githubApp below).
+  image: registry.k8s.io/git-sync/git-sync:v4.4.2
+  # Credentials for private repos (optional). Two ways to authenticate:
   credentials:
-    # GitHub personal access token (PAT) with repo read access
-    # Can be set via --set gitSync.credentials.token=ghp_xxx
+    # 1. Static token — a GitHub PAT (or App installation token) with repo read.
+    #    Can be set via --set gitSync.credentials.token=ghp_xxx, or point at an
+    #    existing secret: `existingSecret` (+ optional `existingSecretKey`,
+    #    default "token"). git-sync uses it as GITSYNC_PASSWORD (username
+    #    x-access-token).
     token: ""
+    # 2. GitHub App — git-sync mints AND auto-refreshes the installation token
+    #    itself from the App private key, so short-lived App tokens work for a
+    #    continuously-running sync. Set installationId + one of applicationId /
+    #    clientId, and point privateKey at a secret holding the PEM. When set,
+    #    this takes precedence over the static token above.
+    githubApp:
+      applicationId: "" # numeric App ID (or use clientId)
+      clientId: "" # App client id (alternative to applicationId)
+      installationId: "" # numeric installation ID
+      privateKey:
+        existingSecret: "" # secret holding the App private-key PEM
+        key: private-key # key within that secret
   plugins: []
   # Example:
   # plugins:

@@ -70,3 +70,32 @@ else "default". Lets a pod run under a Workload-Identity-bound SA.
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+git-sync auth env — GitHub App private key (preferred) or static token.
+git-sync mints AND refreshes the App installation token itself, so a
+short-lived App token works for the continuously-running sync sidecar.
+Rendered into both the init and sidecar git-sync containers.
+*/}}
+{{- define "magento.gitSyncAuthEnv" -}}
+{{- if .Values.gitSync.credentials.githubApp.installationId }}
+- name: GITSYNC_GITHUB_APP_PRIVATE_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.gitSync.credentials.githubApp.privateKey.existingSecret }}
+      key: {{ .Values.gitSync.credentials.githubApp.privateKey.key | default "private-key" }}
+{{- else if or .Values.gitSync.credentials.token .Values.gitSync.credentials.existingSecret }}
+- name: GITSYNC_USERNAME
+  value: x-access-token
+- name: GITSYNC_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.gitSync.credentials.existingSecret }}
+      name: {{ .Values.gitSync.credentials.existingSecret }}
+      key: {{ .Values.gitSync.credentials.existingSecretKey | default "token" }}
+      {{- else }}
+      name: {{ include "magento.fullname" . }}
+      key: git-token
+      {{- end }}
+{{- end }}
+{{- end }}

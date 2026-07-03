@@ -138,20 +138,20 @@ spec:
             - --root=/git
             - --link=code
             - --one-time
-          {{- if or $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
+            {{- if $.Values.gitSync.credentials.githubApp.installationId }}
+            {{- with $.Values.gitSync.credentials.githubApp }}
+            {{- if .applicationId }}
+            - --github-app-application-id={{ .applicationId | int64 }}
+            {{- end }}
+            {{- if .clientId }}
+            - --github-app-client-id={{ .clientId }}
+            {{- end }}
+            - --github-app-installation-id={{ .installationId | int64 }}
+            {{- end }}
+            {{- end }}
+          {{- if or $.Values.gitSync.credentials.githubApp.installationId $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
           env:
-            - name: GITSYNC_USERNAME
-              value: x-access-token
-            - name: GITSYNC_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  {{- if $.Values.gitSync.credentials.existingSecret }}
-                  name: {{ $.Values.gitSync.credentials.existingSecret }}
-                  key: {{ $.Values.gitSync.credentials.existingSecretKey | default "token" }}
-                  {{- else }}
-                  name: {{ include "magento.fullname" $ }}
-                  key: git-token
-                  {{- end }}
+            {{- include "magento.gitSyncAuthEnv" $ | nindent 12 }}
           {{- end }}
           volumeMounts:
             - mountPath: /git
@@ -308,20 +308,20 @@ spec:
             - --root=/git
             - --link=code
             - --period=60s
-          {{- if or $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
+            {{- if $.Values.gitSync.credentials.githubApp.installationId }}
+            {{- with $.Values.gitSync.credentials.githubApp }}
+            {{- if .applicationId }}
+            - --github-app-application-id={{ .applicationId | int64 }}
+            {{- end }}
+            {{- if .clientId }}
+            - --github-app-client-id={{ .clientId }}
+            {{- end }}
+            - --github-app-installation-id={{ .installationId | int64 }}
+            {{- end }}
+            {{- end }}
+          {{- if or $.Values.gitSync.credentials.githubApp.installationId $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
           env:
-            - name: GITSYNC_USERNAME
-              value: x-access-token
-            - name: GITSYNC_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  {{- if $.Values.gitSync.credentials.existingSecret }}
-                  name: {{ $.Values.gitSync.credentials.existingSecret }}
-                  key: {{ $.Values.gitSync.credentials.existingSecretKey | default "token" }}
-                  {{- else }}
-                  name: {{ include "magento.fullname" $ }}
-                  key: git-token
-                  {{- end }}
+            {{- include "magento.gitSyncAuthEnv" $ | nindent 12 }}
           {{- end }}
           volumeMounts:
             - mountPath: /git
