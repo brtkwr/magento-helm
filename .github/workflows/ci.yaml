@@ -47,6 +47,9 @@ jobs:
       - name: Template chart
         run: helm template magento charts/magento --debug
 
+      - name: Test liveness probe logic
+        run: ./charts/magento/tests/liveness-probe.test.sh
+
   lint-docker:
     name: Lint Dockerfiles
     runs-on: ubuntu-latest

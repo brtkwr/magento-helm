@@ -285,6 +285,16 @@ spec:
           # page 500s. Escalating that broken state to a container restart
           # lets postStart's missing-marker branch re-run static-content:deploy
           # and recover without manual intervention.
+          #
+          # The marker is absent for a legitimate reason while a rebuild is
+          # mid-flight: setup:static-content:deploy -f purges pub/static/ and
+          # only rewrites it minutes later. Every path that empties pub/static/
+          # holds .static-rebuild.lock for the duration, so treat "lock held"
+          # as alive. Without this the probe kills the very rebuild it is
+          # waiting for at 4x30s, the rotation marker never advances, and the
+          # next poll restarts the same rebuild — an unrecoverable crashloop.
+          # `flock -n` only tests the lock; if it acquires (nobody rebuilding)
+          # a missing marker is genuine breakage and the restart is correct.
           livenessProbe:
             exec:
               command:
@@ -292,7 +302,8 @@ spec:
                 - -c
                 - |
                   curl -fsS -o /dev/null --max-time 5 http://127.0.0.1/health_check.php{{ if and .Values.staticContentDeploy.enabled (eq .Values.magento.mode "production") }} \
-                    && [ -s /var/www/html/pub/static/deployed_version.txt ]{{ end }}
+                    && { [ -s /var/www/html/pub/static/deployed_version.txt ] \
+                         || ! flock -n 9; } 9>>/var/www/html/var/.static-rebuild.lock{{ end }}
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 4
