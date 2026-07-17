@@ -550,8 +550,16 @@ data:
     # deployed_version.txt will restart the container if a previous rotation
     # crashed mid-redeploy and left pub/static/ empty. postStart re-fires this
     # script and the missing-marker branch below repopulates everything.
+    #
+    # Held under .static-rebuild.lock because the -f deploy below purges
+    # pub/static/ for minutes. The liveness probe treats a held lock as "alive
+    # and rebuilding"; without the lock the probe would kill this recovery
+    # before it finishes and the pod could never heal itself. Uncontended in
+    # practice — the git-sync watcher only starts further down.
     if [ ! -s /var/www/html/pub/static/deployed_version.txt ]; then
       echo "deployed_version.txt missing — running static-content:deploy"
+      (
+      flock 9
       # Snapshot pub/static/ before purging so we can roll back if deploy
       # itself crashes. .htaccess is the only thing the chart ships, so
       # treat "only .htaccess present" as effectively empty.
@@ -578,6 +586,7 @@ data:
       mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }} || true
       mage cache:flush || true
       fix_permissions
+      ) 9>>/var/www/html/var/.static-rebuild.lock
     else
       echo "static content present (deployed_version.txt non-empty), skipping deploy"
     fi
@@ -668,7 +677,9 @@ data:
           # (new di.xml preferences, constructor deps, or db_schema.xml). Run
           # the same sequence cold-start does so the running pod picks them
           # up without a kubectl rollout restart. flock serialises rebuilds
-          # so a fast burst of rotations doesn't race itself.
+          # so a fast burst of rotations doesn't race itself, and doubles as
+          # the signal to the liveness probe that pub/static/ is empty because
+          # a rebuild is in flight rather than because it broke.
           rebuild_ok=false
           (
             flock -n 9 || { echo "rotation rebuild already in flight, skipping"; exit 2; }
@@ -705,7 +716,7 @@ data:
               exit 1
             fi
             echo "git-sync auto-reload (full rebuild) complete"
-          ) 9>/var/www/html/var/.gitsync-rebuild.lock && rebuild_ok=true
+          ) 9>>/var/www/html/var/.static-rebuild.lock && rebuild_ok=true
           if $rebuild_ok; then
             # Read the symlink *now* — burst pushes during the rebuild may
             # have advanced it past the SHA we detected. The rebuild rsynced
@@ -724,6 +735,7 @@ data:
           {{- else }}
           fast_ok=false
           (
+            flock -n 9 || { echo "rotation fast-reload already in flight, skipping"; exit 2; }
             set -euo pipefail
             trap 'echo "ERROR: rotation fast-reload failed at line $LINENO with exit $?"' ERR
             trap fix_permissions EXIT
@@ -758,7 +770,7 @@ data:
               exit 1
             fi
             echo "git-sync auto-reload complete"
-          ) && fast_ok=true
+          ) 9>>/var/www/html/var/.static-rebuild.lock && fast_ok=true
           if $fast_ok; then
             # Read the symlink *now* (post-reload) so burst pushes that
             # landed during the reload coalesce into a single marker write.
