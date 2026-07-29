@@ -582,7 +582,13 @@ data:
       sc_deploy || echo "ERROR: static-content deploy did not complete"
       # Toggle dev/static/sign so rendered /static/ URLs include /version<ts>/...
       # — needed for safe long-cache CDN rules. Disabling reverts to unsigned URLs.
-      mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }} || true
+      # `|| true` would swallow a real failure here: config:set can reject a
+      # perfectly valid path when a third-party module poisons the adminhtml
+      # config Structure singleton at CLI boot, and the resulting drift is
+      # invisible. Report loudly, but still do not abort the static rebuild.
+      if ! mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }}; then
+        echo "ERROR: config:set dev/static/sign failed — signed static URLs may not match staticContentDeploy.signing"
+      fi
       mage cache:flush || true
       fix_permissions
       ) 9>>/var/www/html/var/.static-rebuild.lock
