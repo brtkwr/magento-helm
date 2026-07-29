@@ -295,6 +295,12 @@ spec:
           # next poll restarts the same rebuild — an unrecoverable crashloop.
           # `flock -n` only tests the lock; if it acquires (nobody rebuilding)
           # a missing marker is genuine breakage and the restart is correct.
+          #
+          # With staticContentDeploy.atomicSwap (the default) the rebuild
+          # builds into the idle slot and pub/static keeps serving the previous
+          # bundle throughout, so the marker should never go missing in the
+          # first place. The lock check stays for the in-place fallback path
+          # and because it costs nothing when pub/static is healthy.
           livenessProbe:
             exec:
               command:

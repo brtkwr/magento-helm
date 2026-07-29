@@ -32,6 +32,17 @@ data:
     # specific admin page rather than a clean restart-time error.
     trap fix_permissions EXIT
 
+    {{- if .Values.staticContentDeploy.enabled }}
+{{ include "magento.staticSlotsShell" . | indent 4 }}
+
+    # Convert pub/static to the A/B slot layout on first run (no-op after
+    # that). Done here, in the init container, so the one non-atomic moment
+    # of the conversion happens before Apache accepts any traffic. A failure
+    # is not fatal: the layout stays as it is and sc_deploy falls back to the
+    # in-place deploy, i.e. the behaviour that shipped before PLAT-2002.
+    sc_slots_init || echo "WARNING: static slot conversion failed; deploys will run in place"
+    {{- end }}
+
     {{- if .Values.redis.enabled }}
     # Wire app/etc/env.php to use the Redis sidecar for cache.default,
     # cache.page_cache, and session. Idempotent — setup:config:set just
@@ -436,6 +447,10 @@ data:
     # warning gets escalated by the error handler.
     trap fix_permissions EXIT
 
+    {{- if .Values.staticContentDeploy.enabled }}
+{{ include "magento.staticSlotsShell" . | indent 4 }}
+    {{- end }}
+
     # Helper: Set store-level config using Magento's ConfigWriter API
     # Usage: magento_config_set_store <store_code> <path> <value>
     # Example: magento_config_set_store hyva design/theme/theme_id 5
@@ -551,36 +566,20 @@ data:
     # crashed mid-redeploy and left pub/static/ empty. postStart re-fires this
     # script and the missing-marker branch below repopulates everything.
     #
-    # Held under .static-rebuild.lock because the -f deploy below purges
+    # Held under .static-rebuild.lock because an in-place -f deploy purges
     # pub/static/ for minutes. The liveness probe treats a held lock as "alive
     # and rebuilding"; without the lock the probe would kill this recovery
     # before it finishes and the pod could never heal itself. Uncontended in
-    # practice — the git-sync watcher only starts further down.
+    # practice — the git-sync watcher only starts further down. (With
+    # atomicSwap on, sc_deploy builds into the idle slot and pub/static is
+    # never empty, but the lock still serialises concurrent rebuilds.)
     if [ ! -s /var/www/html/pub/static/deployed_version.txt ]; then
       echo "deployed_version.txt missing — running static-content:deploy"
       (
       flock 9
-      # Snapshot pub/static/ before purging so we can roll back if deploy
-      # itself crashes. .htaccess is the only thing the chart ships, so
-      # treat "only .htaccess present" as effectively empty.
-      sc_have_prev=false
-      if [ -d /var/www/html/pub/static ] \
-         && [ -n "$(ls -A /var/www/html/pub/static 2>/dev/null | grep -v '^\.htaccess$' || true)" ]; then
-        rsync -a --delete /var/www/html/pub/static/ /var/www/html/var/.pub-static-prev/ \
-          && sc_have_prev=true
-      fi
-      sc_failed=false
-      {{- range .Values.staticContentDeploy.areas }}
-      echo "Deploying static content for area={{ . }} locales: {{ join " " $.Values.staticContentDeploy.locales }}..."
-      if ! mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }}; then
-        echo "ERROR: static-content:deploy failed for area={{ . }}"
-        sc_failed=true
-      fi
-      {{- end }}
-      if $sc_failed && $sc_have_prev; then
-        echo "ALERT: rolling pub/static/ back to previous snapshot"
-        rsync -a --delete /var/www/html/var/.pub-static-prev/ /var/www/html/pub/static/ || true
-      fi
+      # Builds into the idle slot and flips, or falls back to an in-place
+      # purge-and-rebuild with the historical snapshot rollback.
+      sc_deploy || echo "ERROR: static-content deploy did not complete"
       # Toggle dev/static/sign so rendered /static/ URLs include /version<ts>/...
       # — needed for safe long-cache CDN rules. Disabling reverts to unsigned URLs.
       mage config:set dev/static/sign {{ if .Values.staticContentDeploy.signing }}1{{ else }}0{{ end }} || true
@@ -686,19 +685,16 @@ data:
             set -euo pipefail
             trap 'echo "ERROR: rotation rebuild failed at line $LINENO with exit $?"' ERR
             trap fix_permissions EXIT
-            {{- if eq .Values.magento.mode "production" }}
-            # Snapshot pub/static/ before -f purges it. Restored on smoke
-            # failure so the storefront keeps serving the previous (stale
-            # but functional) bundle instead of 500ing on missing assets.
-            rsync -a --delete /var/www/html/pub/static/ /var/www/html/var/.pub-static-prev/ || true
-            {{- end }}
             mage setup:upgrade
             rm -rf generated/code/* generated/metadata 2>/dev/null || true
             mage setup:di:compile
             {{- if eq .Values.magento.mode "production" }}
-            {{- range .Values.staticContentDeploy.areas }}
-            mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }}
-            {{- end }}
+            # Rebuild static content. With atomicSwap the build lands in the
+            # idle slot and goes live with one symlink rename, so the
+            # storefront serves the previous bundle throughout and never sees
+            # an empty pub/static; the previously live slot is what
+            # sc_rollback flips back to on smoke failure below.
+            sc_deploy
             {{- end }}
             mage cache:flush
             fix_permissions
@@ -708,10 +704,8 @@ data:
             if [ "$smoke" != "200" ]; then
               echo "ALERT: post-rotation smoke failed: HTTP $smoke — rolling back"
               {{- if eq .Values.magento.mode "production" }}
-              if [ -d /var/www/html/var/.pub-static-prev ]; then
-                rsync -a --delete /var/www/html/var/.pub-static-prev/ /var/www/html/pub/static/ || true
-                apachectl -k graceful || true
-              fi
+              sc_rollback || true
+              apachectl -k graceful || true
               {{- end }}
               exit 1
             fi
@@ -743,10 +737,8 @@ data:
             # Re-deploy static content from the new SHA. Materialises real files
             # (no symlinks) so the new plugin assets are served immediately and
             # don't depend on git-sync worktree paths that may be pruned later.
-            rsync -a --delete /var/www/html/pub/static/ /var/www/html/var/.pub-static-prev/ || true
-            {{- range .Values.staticContentDeploy.areas }}
-            mage setup:static-content:deploy -f --area={{ . }} {{ join " " $.Values.staticContentDeploy.locales }}
-            {{- end }}
+            # With atomicSwap this builds into the idle slot and flips.
+            sc_deploy
             {{- else }}
             # Static-content-deploy disabled: clear lazy-generated artefacts so
             # the next request regenerates them (as symlinks in developer mode)
@@ -762,10 +754,8 @@ data:
             if [ "$smoke" != "200" ]; then
               echo "ALERT: post-rotation smoke failed: HTTP $smoke — rolling back"
               {{- if .Values.staticContentDeploy.enabled }}
-              if [ -d /var/www/html/var/.pub-static-prev ]; then
-                rsync -a --delete /var/www/html/var/.pub-static-prev/ /var/www/html/pub/static/ || true
-                apachectl -k graceful || true
-              fi
+              sc_rollback || true
+              apachectl -k graceful || true
               {{- end }}
               exit 1
             fi

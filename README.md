@@ -281,6 +281,68 @@ kubectl exec deploy/magento -c magento -- bin/magento cache:flush
 
 **Future enhancement:** The chart may add `--exechook` support to automatically flush cache on every sync.
 
+## Static Content Deployment
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `staticContentDeploy.enabled` | Run `setup:static-content:deploy` during setup and on git-sync rotations | `false` |
+| `staticContentDeploy.areas` | Areas to deploy | `[frontend, adminhtml]` |
+| `staticContentDeploy.locales` | Locales to deploy | `[en_US]` |
+| `staticContentDeploy.signing` | Set `dev/static/sign=1` so asset URLs carry `/version<ts>/` | `false` |
+| `staticContentDeploy.atomicSwap` | Build into an idle A/B slot and go live with an atomic symlink flip | `true` |
+
+### Atomic swaps (`atomicSwap`)
+
+`setup:static-content:deploy` empties `pub/static` and only rewrites it a
+couple of minutes later, and it bumps `deployed_version.txt` at the *start*
+of that window. Under `magento.mode=production` every `/static/` URL 404s for
+the duration and the storefront 500s with `Unable to retrieve deployment
+version of static files from the file system`. When `gitSync.reload` is on,
+each plugin push triggers a rebuild, so a busy branch keeps the shop down for
+much of the day.
+
+With `atomicSwap` (the default) `pub/static` is a **symlink** to one of two
+real directories, `pub/static-a` and `pub/static-b`:
+
+```
+pub/static      -> pub/static-b     # live, serving
+pub/static-a                        # idle, next build target
+```
+
+A deploy is pointed at the idle slot (`bin/magento ...
+--bootstrap=MAGE_DIRS[static][path]=/var/www/html/pub/static-<slot>`), and it
+goes live with a single `rename(2)` of the symlink once
+`deployed_version.txt` is present in the new slot. Consequences:
+
+- No request ever sees a missing or half-populated `pub/static`.
+- A failed build never touches the live slot — nothing is flipped, and the
+  git-sync watcher retries on its next poll.
+- Rollback on a failed post-rotation smoke check is a flip back to the
+  previous slot instead of an rsync restore, so it is instant and cannot
+  itself fail half-way. The `var/.pub-static-prev` snapshot (~500M of PVC
+  writes per rotation) is no longer taken.
+- Peak static disk roughly doubles (~2× `pub/static`, typically ~1G). Both
+  slots live on the **container filesystem**, not the PVC, which only mounts
+  `var`, `pub/media` and `app/etc`. No container in this chart sets
+  `ephemeral-storage` requests or limits, so this space is unaccounted for by
+  the scheduler — size nodes accordingly.
+- Two slots only; the previously live one is reused as the next build target,
+  so nothing accumulates.
+- Existing pods convert on their next start: `pub/static` is hardlinked into
+  slot `a` (no data copied) and replaced by the symlink, in the init
+  container, before Apache accepts traffic. Re-runs and crash-interrupted
+  conversions are handled.
+- Content Magento generates into `pub/static` at runtime (merged/minified
+  JS+CSS under `_cache/merged`) always lands in the live slot, and is
+  regenerated lazily after a flip — the same as after any `-f` deploy today.
+
+The chart probes the bootstrap override with
+`--refresh-content-version-only` before trusting a real build to it. If the
+image ignores the override, or the slot layout cannot be created, the chart
+logs and falls back to the historical in-place deploy, so the worst case is
+the previous behaviour rather than a broken one. Set `atomicSwap: false` to
+force that path.
+
 ## Docker Images
 
 Public images are available at:
