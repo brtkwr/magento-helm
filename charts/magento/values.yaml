@@ -47,6 +47,27 @@ staticContentDeploy:
     - adminhtml                # can include both safely.
   locales:
     - en_US
+  # Build static content into an idle A/B slot directory and go live with a
+  # single atomic symlink flip, instead of purging pub/static and rebuilding
+  # it in place.
+  #
+  # In-place rebuilds empty pub/static for the ~2 minutes the deploy takes
+  # (and bump deployed_version.txt at the start of that window), so under
+  # magento.mode=production every /static/ URL 404s and the storefront 500s
+  # with "Unable to retrieve deployment version of static files from the file
+  # system". With gitSync.reload rotations firing every few minutes on a busy
+  # branch that is a near-permanent outage. See PLAT-2002.
+  #
+  # With this on, pub/static becomes a symlink to pub/static-a or
+  # pub/static-b; the deploy writes to whichever is idle and the flip is one
+  # rename(2). Costs a second copy of pub/static (~500M per shop) on the
+  # container filesystem — not on the PVC, which only mounts var, pub/media
+  # and app/etc. Two slots only, reused alternately, so nothing accumulates.
+  #
+  # Turn off to force the historical in-place behaviour. The chart also falls
+  # back to it by itself if the image's bin/magento does not honour the
+  # static-path bootstrap override.
+  atomicSwap: true
   signing: false               # When true, sets dev/static/sign=1 so
                                # rendered URLs include /version<ts>/...
                                # — required for safe long-cache CDN
