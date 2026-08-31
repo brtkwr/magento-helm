@@ -337,6 +337,33 @@ gitSync:
       - /var/www/html/pub/static/_cache
       - /var/www/html/var/view_preprocessed
       - /var/www/html/var/cache/*
+    # Guards around the compile:true full-rebuild path (rm -rf generated/ +
+    # setup:di:compile). A compile that OOMs or is otherwise interrupted
+    # leaves generated/ half-wiped, which is a live fatal (compiled DI
+    # constructor-arg map missing a class's newest params) rather than a
+    # clean startup error.
+    diCompileGuard:
+      # generated/code's top-level entry count after a real compile is in
+      # the hundreds; an interrupted compile leaves single/double digits.
+      # A compile whose result is below this floor is treated as failed
+      # even though setup:di:compile itself returned 0 (it does, mid-OOM-kill
+      # retry included — the floor is what actually distinguishes "done" from
+      # "half done").
+      generatedCodeFloor: 150
+      # Classes instantiated post-compile to catch a compiled
+      # constructor-arg map that predates a class's current constructor
+      # (TypeError at ObjectManager resolution time, not a compile-time
+      # error — setup:di:compile has no static check for this). Populated
+      # per-deployment in values-*.yaml with the plugin's own
+      # Model/Config/Backend/* classes; empty here since the chart has no
+      # opinion on plugin class names.
+      smokeTestClasses: []
+      # Emit a Kubernetes Event (visible via `kubectl get events`, and to
+      # anything watching Warning events) when a compile fails the floor
+      # or smoke checks, or setup:di:compile itself fails. Requires the
+      # pod's ServiceAccount to have `create` on `events` in its namespace
+      # (not granted by this chart — see the deployment's RBAC).
+      alertOnFailure: true
 
 # Resources
 resources:

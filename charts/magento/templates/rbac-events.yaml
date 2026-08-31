@@ -1,0 +1,33 @@
+{{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled .Values.gitSync.reload.compile .Values.gitSync.reload.diCompileGuard.alertOnFailure }}
+# Lets the pod's own ServiceAccount create a Kubernetes Event (dc_emit_event
+# in _helpers.tpl) when the di:compile guard fails -- visible via
+# `kubectl get events`, not just a container log. Only rendered when the
+# compile-guard's alerting is active, i.e. only for gitSync dev shops with
+# reload.compile: true (production shops carry no gitSync.plugins at all,
+# so this is inert there regardless of alertOnFailure's default).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "magento.fullname" . }}-events
+  labels:
+    {{- include "magento.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "magento.fullname" . }}-events
+  labels:
+    {{- include "magento.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "magento.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "magento.fullname" . }}-events
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
