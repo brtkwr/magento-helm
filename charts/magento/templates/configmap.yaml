@@ -43,6 +43,10 @@ data:
     sc_slots_init || echo "WARNING: static slot conversion failed; deploys will run in place"
     {{- end }}
 
+    {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled .Values.gitSync.reload.compile }}
+{{ include "magento.diCompileGuardShell" . | indent 4 }}
+    {{- end }}
+
     {{- if .Values.redis.enabled }}
     # Wire app/etc/env.php to use the Redis sidecar for cache.default,
     # cache.page_cache, and session. Idempotent — setup:config:set just
@@ -246,12 +250,33 @@ data:
       # Clean generated code
       rm -rf generated/code generated/metadata
 
+      {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled .Values.gitSync.reload.compile }}
+      echo "Running setup:di:compile (guarded)..."
+      if ! mage setup:di:compile; then
+        echo "setup:di:compile failed, restoring env.php backup"
+        cp app/etc/env.php.bak app/etc/env.php
+        exit 1
+      fi
+      dc_n=$(dc_entry_count)
+      if [ "$dc_n" -lt "$DC_FLOOR" ]; then
+        dc_alert "generated/code has only $dc_n entries after di:compile (floor: $DC_FLOOR) -- treating the compile as failed"
+        cp app/etc/env.php.bak app/etc/env.php
+        exit 1
+      fi
+      dc_smoke_out=$(dc_smoke_test) || {
+        dc_alert "post-compile smoke test failed: $dc_smoke_out"
+        cp app/etc/env.php.bak app/etc/env.php
+        exit 1
+      }
+      dc_snapshot_lastgood
+      {{- else }}
       echo "Running setup:di:compile..."
       mage setup:di:compile || {
         echo "setup:di:compile failed, restoring env.php backup"
         cp app/etc/env.php.bak app/etc/env.php
         exit 1
       }
+      {{- end }}
 
       # Flush all caches after di:compile (ABN-415 workaround).
       #
@@ -357,6 +382,14 @@ data:
 
       mage setup:upgrade
       mage setup:di:compile
+      {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled .Values.gitSync.reload.compile }}
+      dc_n=$(dc_entry_count)
+      if [ "$dc_n" -lt "$DC_FLOOR" ]; then
+        dc_alert "fresh-install generated/code has only $dc_n entries after di:compile (floor: $DC_FLOOR)"
+      else
+        dc_smoke_out=$(dc_smoke_test) && dc_snapshot_lastgood || dc_alert "fresh-install post-compile smoke test failed: $dc_smoke_out"
+      fi
+      {{- end }}
 
       # Note: catalog:images:resize runs in postStart after store views are created
       # This ensures all themes (Luma, Hyva, etc.) get their image caches
@@ -449,6 +482,10 @@ data:
 
     {{- if .Values.staticContentDeploy.enabled }}
 {{ include "magento.staticSlotsShell" . | indent 4 }}
+    {{- end }}
+
+    {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled .Values.gitSync.reload.compile }}
+{{ include "magento.diCompileGuardShell" . | indent 4 }}
     {{- end }}
 
     # Helper: Set store-level config using Magento's ConfigWriter API
@@ -553,6 +590,27 @@ data:
     # DEPRECATED postScript (use hooks.postSetup)
 {{ .Values.postScript | indent 4 }}
     {{- end }}
+    {{- end }}
+
+    {{- if and .Values.gitSync.plugins .Values.gitSync.reload.enabled .Values.gitSync.reload.compile }}
+    # Startup self-heal for generated/. A container restart —
+    # including an OOMKilled recovery mid rotation-rebuild — can land here
+    # with generated/ half-wiped: the rebuild's own ERR/EXIT traps never ran
+    # because SIGKILL doesn't trigger them. Checked before Apache serves
+    # traffic, so a restarted pod never silently serves a compiled DI map
+    # that predates the plugin's current constructor signatures (the
+    # ApiKey\Interceptor fatal that motivated this).
+    dc_n=$(dc_entry_count)
+    if [ "$dc_n" -lt "$DC_FLOOR" ]; then
+      echo "generated/code has $dc_n entries (floor $DC_FLOOR) at startup — self-healing"
+      if dc_restore_lastgood && [ "$(dc_entry_count)" -ge "$DC_FLOOR" ] && dc_smoke_test >/dev/null 2>&1; then
+        echo "restored generated/ from the last verified-good snapshot"
+      else
+        echo "no usable last-good snapshot — running a synchronous full recompile"
+        dc_recompile || dc_alert "startup recompile failed — generated/ may still be broken"
+      fi
+      fix_permissions
+    fi
     {{- end }}
 
     {{- if .Values.staticContentDeploy.enabled }}
@@ -691,9 +749,16 @@ data:
             set -euo pipefail
             trap 'echo "ERROR: rotation rebuild failed at line $LINENO with exit $?"' ERR
             trap fix_permissions EXIT
-            mage setup:upgrade
-            rm -rf generated/code/* generated/metadata 2>/dev/null || true
-            mage setup:di:compile
+            # dc_recompile wraps setup:upgrade + the rm -rf + setup:di:compile
+            # with a post-compile entry-count floor and class-instantiation
+            # smoke test, and only snapshots generated/ as
+            # last-known-good once both pass. On failure, restore whatever
+            # snapshot exists rather than leave generated/ half-wiped for the
+            # next request to hit.
+            if ! dc_recompile; then
+              dc_restore_lastgood || echo "no last-good generated/ snapshot to restore — leaving as-is for the next retry"
+              exit 1
+            fi
             {{- if eq .Values.magento.mode "production" }}
             # Rebuild static content. With atomicSwap the build lands in the
             # idle slot and goes live with one symlink rename, so the

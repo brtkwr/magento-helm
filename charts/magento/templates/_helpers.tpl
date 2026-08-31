@@ -339,3 +339,125 @@ sc_rollback() {
 }
 # --- end atomic static-content deploy -------------------------------------
 {{- end }}
+
+{{/*
+Shell helpers guarding the full-rebuild path (rm -rf generated/ +
+setup:di:compile). Rendered into both init-setup.sh (startup self-heal) and
+setup.sh (rotation-rebuild) so both share one implementation. Requires the
+`mage` wrapper. An OOMKilled compile leaves generated/ wiped
+but not rebuilt, which is a live fatal, not a clean restart-time error.
+*/}}
+{{- define "magento.diCompileGuardShell" -}}
+# --- di:compile guard (floor check + class-instantiation smoke test) ------
+DC_GENERATED=/var/www/html/generated
+DC_LASTGOOD=/var/www/html/var/.generated-lastgood
+DC_FLOOR={{ .Values.gitSync.reload.diCompileGuard.generatedCodeFloor }}
+
+dc_entry_count() {
+  find "$DC_GENERATED/code" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l
+}
+
+# Instantiate a handful of known DI-heavy classes via the object manager.
+# setup:di:compile has no static check for "does this class's compiled
+# constructor-arg map still match its current __construct signature" — that
+# only surfaces as a TypeError the first time something resolves the class,
+# which for a payment method's Config\Backend classes is the admin config
+# page. Catch it here instead of in the admin's browser tab.
+dc_smoke_test() {
+  {{- $classes := .Values.gitSync.reload.diCompileGuard.smokeTestClasses }}
+  {{- if not $classes }}
+  return 0
+  {{- else }}
+  runuser -u www-data -- php -r "
+    require 'app/bootstrap.php';
+    \$b = Magento\Framework\App\Bootstrap::create(BP, \$_SERVER);
+    \$om = \$b->getObjectManager();
+    \$classes = [
+      {{- range $classes }}
+      '{{ . | replace "\\" "\\\\" }}',
+      {{- end }}
+    ];
+    \$failed = [];
+    foreach (\$classes as \$c) {
+      if (!class_exists(\$c)) { continue; }
+      try { \$om->create(\$c); } catch (\Throwable \$e) { \$failed[] = \"\$c: \" . \$e->getMessage(); }
+    }
+    if (\$failed) { fwrite(STDERR, implode(\"\n\", \$failed) . \"\n\"); exit(1); }
+  " 2>&1
+  {{- end }}
+}
+
+# Snapshot a verified-good generated/ onto the PVC (var/ subPath, survives
+# pod restarts) so a future interrupted compile has something to fall back
+# to. Only ever called after dc_recompile's own floor+smoke checks pass.
+dc_snapshot_lastgood() {
+  mkdir -p "$DC_LASTGOOD/code" "$DC_LASTGOOD/metadata"
+  rsync -a --delete "$DC_GENERATED/code/" "$DC_LASTGOOD/code/" 2>/dev/null || true
+  rsync -a --delete "$DC_GENERATED/metadata/" "$DC_LASTGOOD/metadata/" 2>/dev/null || true
+}
+
+# Restore generated/ from the last verified-good snapshot. Used at pod
+# startup when generated/ is below the floor and no rebuild is in flight —
+# the case an in-container ERR/EXIT trap can never handle, because an
+# OOMKill is a SIGKILL to the whole container, not just the compile step.
+dc_restore_lastgood() {
+  [ -d "$DC_LASTGOOD/code" ] && [ -n "$(ls -A "$DC_LASTGOOD/code" 2>/dev/null)" ] || return 1
+  rm -rf "$DC_GENERATED/code" "$DC_GENERATED/metadata"
+  mkdir -p "$DC_GENERATED/code" "$DC_GENERATED/metadata"
+  rsync -a "$DC_LASTGOOD/code/" "$DC_GENERATED/code/"
+  rsync -a "$DC_LASTGOOD/metadata/" "$DC_GENERATED/metadata/"
+}
+
+{{- if .Values.gitSync.reload.diCompileGuard.alertOnFailure }}
+# Kubernetes Event, in addition to the log line — `kubectl get events` and
+# any Warning-event watcher (many on-call setups pipe these to Slack) see
+# it; a log line inside the pod does not. Uses the pod's own mounted
+# ServiceAccount token; the namespace's Role must grant `create` on
+# `events` for that ServiceAccount (not part of this chart).
+dc_emit_event() {
+  local msg="$1" sa=/var/run/secrets/kubernetes.io/serviceaccount
+  [ -r "$sa/token" ] || return 0
+  local ns; ns=$(cat "$sa/namespace" 2>/dev/null) || return 0
+  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local body
+  body=$(printf '{"apiVersion":"v1","kind":"Event","metadata":{"generateName":"di-compile-guard-"},"involvedObject":{"kind":"Pod","namespace":"%s","name":"%s"},"reason":"DiCompileGuardFailed","message":%s,"type":"Warning","firstTimestamp":"%s","lastTimestamp":"%s","count":1,"source":{"component":"di-compile-guard"}}' \
+    "$ns" "$(hostname)" "$(printf '%s' "$msg" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '"'"$msg"'"')" "$now" "$now")
+  curl -sS -o /dev/null --cacert "$sa/ca.crt" -H "Authorization: Bearer $(cat "$sa/token")" \
+    -H 'Content-Type: application/json' -X POST \
+    "https://kubernetes.default.svc/api/v1/namespaces/$ns/events" -d "$body" || true
+}
+{{- else }}
+dc_emit_event() { :; }
+{{- end }}
+
+dc_alert() {
+  echo "ALERT: $1"
+  dc_emit_event "$1"
+}
+
+# Full rebuild + verify. Returns 0 only once di:compile has succeeded AND
+# passed both the entry-count floor and the smoke test — at which point
+# generated/ is snapshotted as the new last-known-good. Returns 1 on any
+# failure; generated/ is left as-is (wiped, possibly mid-compile) and it is
+# the caller's job to decide whether to restore from the last snapshot.
+dc_recompile() {
+  mage setup:upgrade || { dc_alert "setup:upgrade failed ahead of di:compile"; return 1; }
+  rm -rf "$DC_GENERATED"/code/* "$DC_GENERATED/metadata" 2>/dev/null || true
+  if ! mage setup:di:compile; then
+    dc_alert "setup:di:compile failed"
+    return 1
+  fi
+  local n; n=$(dc_entry_count)
+  if [ "$n" -lt "$DC_FLOOR" ]; then
+    dc_alert "generated/code has only $n entries after di:compile (floor: $DC_FLOOR) -- treating the compile as failed"
+    return 1
+  fi
+  local smoke_out
+  if ! smoke_out=$(dc_smoke_test); then
+    dc_alert "post-compile smoke test failed: $smoke_out"
+    return 1
+  fi
+  dc_snapshot_lastgood
+}
+# --- end di:compile guard ---------------------------------------------------
+{{- end }}
