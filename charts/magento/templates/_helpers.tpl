@@ -308,6 +308,12 @@ sc_deploy_inplace() {
 
 # Deploy static content the safest way available.
 sc_deploy() {
+  # ABN-423: a root-mode `bin/magento` call outside the mage() wrapper (e.g.
+  # a manual `kubectl exec` fix) leaves root-owned entries under
+  # var/view_preprocessed/. The next www-data-scoped deploy then aborts
+  # partway through with "<path> is not writable", silently truncating
+  # pub/static/ to whichever themes/locales it reached before the fault.
+  chown -R www-data:www-data var/ generated/ pub/static/ 2>/dev/null || true
   {{- if $.Values.staticContentDeploy.atomicSwap }}
   local rc=0
   sc_deploy_slot || rc=$?
