@@ -19,6 +19,20 @@ RUN curl -fsSLo /usr/local/bin/magerun2 \
 # and so demand Magento credentials at runtime, which a local dev box should
 # not need.
 
+# Language packs the local shop ships with. Installed here, at build time,
+# where CI holds the Magento credentials - resolving them needs repo.magento.com
+# even though the packages themselves come from packagist. Doing it at build
+# time is what keeps `make install` free of Magento credentials entirely.
+RUN --mount=type=secret,id=composer_auth,target=/root/.composer/auth.json \
+    --mount=type=cache,target=/root/.composer/cache \
+    composer require --no-interaction --no-plugins \
+      community-engineering/language-es_es \
+      community-engineering/language-nl_nl \
+      community-engineering/language-nb_no \
+      community-engineering/language-sv_se \
+      community-engineering/language-fi_fi \
+      community-engineering/language-da_dk
+
 COPY dev-entrypoint.sh /usr/local/bin/dev-entrypoint
 ENTRYPOINT ["dev-entrypoint"]
 CMD ["apache2-foreground"]
