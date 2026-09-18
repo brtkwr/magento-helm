@@ -372,11 +372,12 @@ cat > auth.json << 'EOF'
 EOF
 
 # Build base image
-docker buildx build -f Dockerfile.base \
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f Dockerfile.base \
   -t your-registry/magento-base:php8.2 --push .
 
 # Build Magento image
-docker buildx build \
+docker buildx build --platform linux/amd64,linux/arm64 \
   --secret id=composer_auth,src=auth.json \
   -t your-registry/magento:2.4.8 --push .
 ```

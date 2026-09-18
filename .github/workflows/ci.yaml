@@ -71,15 +71,30 @@ jobs:
           failure-threshold: error
 
   docker-base:
-    name: Build Base Image
-    runs-on: ubuntu-latest
+    name: Build Base Image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
     needs: [changes, lint-docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.docker == 'true'
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/magento-base
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+
+      - name: Prepare platform pair
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> $GITHUB_ENV
+        env:
+          PLATFORM: ${{ matrix.platform }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -89,35 +104,151 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get short SHA
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Build and push base image
+      - name: Build and push base image by digest
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: docker
           file: docker/Dockerfile.base
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:php8.2
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:php8.2-${{ steps.sha.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=base-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=base-${{ env.PLATFORM_PAIR }}
 
-  docker-magento:
-    name: Build Magento ${{ matrix.version }}
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          touch "${{ runner.temp }}/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-base-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-base-merge:
+    name: Merge Base Manifest
     runs-on: ubuntu-latest
     needs: [docker-base]
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/magento-base
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-base-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          short=$(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD)
+          docker buildx imagetools create \
+            -t "$IMAGE:php8.2" \
+            -t "$IMAGE:php8.2-$short" \
+            $(printf "$IMAGE@sha256:%s " *)
+
+  docker-magento:
+    name: Build Magento ${{ matrix.version }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    needs: [docker-base-merge]
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/magento
+    strategy:
+      matrix:
+        version: ["2.4.6", "2.4.7", "2.4.8"]
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare platform pair
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> $GITHUB_ENV
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Magento image by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: docker
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            MAGENTO_VERSION=${{ matrix.version }}
+            PHP_VERSION=8.2
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          secrets: |
+            composer_auth={"http-basic":{"repo.magento.com":{"username":"${{ secrets.MAGENTO_PUBLIC_KEY }}","password":"${{ secrets.MAGENTO_PRIVATE_KEY }}"}}}
+          cache-from: type=gha,scope=magento-${{ matrix.version }}-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=magento-${{ matrix.version }}-${{ env.PLATFORM_PAIR }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          touch "${{ runner.temp }}/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-magento-${{ matrix.version }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-magento-merge:
+    name: Merge Magento ${{ matrix.version }} Manifest
+    runs-on: ubuntu-latest
+    needs: [docker-magento]
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/magento
     strategy:
       matrix:
         version: ["2.4.6", "2.4.7", "2.4.8"]
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-magento-${{ matrix.version }}-*
+          merge-multiple: true
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -126,26 +257,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get short SHA
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Build and push Magento image
-        uses: docker/build-push-action@v5
-        with:
-          context: docker
-          file: docker/Dockerfile
-          push: true
-          build-args: |
-            MAGENTO_VERSION=${{ matrix.version }}
-            PHP_VERSION=8.2
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:${{ matrix.version }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento:${{ matrix.version }}-${{ steps.sha.outputs.short }}
-          secrets: |
-            composer_auth={"http-basic":{"repo.magento.com":{"username":"${{ secrets.MAGENTO_PUBLIC_KEY }}","password":"${{ secrets.MAGENTO_PRIVATE_KEY }}"}}}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          short=$(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD)
+          docker buildx imagetools create \
+            -t "$IMAGE:${{ matrix.version }}" \
+            -t "$IMAGE:${{ matrix.version }}-$short" \
+            $(printf "$IMAGE@sha256:%s " *)
 
   helm-publish:
     name: Publish Helm Chart

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Magento 2.4.8 Base Image - PHP 8.2 + Apache + Extensions
-# Build: docker buildx build -f Dockerfile.base -t ghcr.io/brtkwr/magento-base:php8.2 --push .
+# Build: docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.base -t ghcr.io/brtkwr/magento-base:php8.2 --push .
 FROM php:8.2-apache
 
 # Install system dependencies
