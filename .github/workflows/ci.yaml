@@ -323,6 +323,8 @@ jobs:
           build-args: |
             MAGENTO_VERSION=2.4.8
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          secrets: |
+            composer_auth={"http-basic":{"repo.magento.com":{"username":"${{ secrets.MAGENTO_PUBLIC_KEY }}","password":"${{ secrets.MAGENTO_PRIVATE_KEY }}"}}}
           cache-from: type=gha,scope=dev-${{ env.PLATFORM_PAIR }}
           cache-to: type=gha,mode=max,scope=dev-${{ env.PLATFORM_PAIR }}
 

@@ -442,6 +442,10 @@ Notes:
 - **The URL scheme matters.** `setup:install` rejects a non-https
   `--base-url-secure`, so a plain `http://` dev URL is installed with the secure
   flags off.
+- **No Magento credentials needed to run it.** The six
+  `community-engineering/language-*` packs are installed into the image at
+  build time, where CI holds the keys, so nothing at runtime has to reach
+  `repo.magento.com`.
 - Defaults: admin `exampleuser` / `examplepassword123`, database `magento`
   on host `db`, OpenSearch on `search:9200`. Override via the environment
   variables read at the top of `docker/dev-entrypoint.sh`.
