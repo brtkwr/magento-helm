@@ -18,6 +18,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/magento-base
     strategy:
+      fail-fast: false
       matrix:
         platform: [linux/amd64, linux/arm64]
         include:
@@ -108,6 +109,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/magento
     strategy:
+      fail-fast: false
       matrix:
         platform: [linux/amd64, linux/arm64]
         include:
@@ -150,7 +152,7 @@ jobs:
           file: docker/Dockerfile
           platforms: ${{ matrix.platform }}
           build-args: |
-            MAGENTO_VERSION=2.4.6
+            MAGENTO_VERSION=2.4.8
             PHP_VERSION=8.2
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           secrets: |
@@ -205,7 +207,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t "$IMAGE:${{ steps.version.outputs.version }}" \
-            -t "$IMAGE:2.4.6" \
+            -t "$IMAGE:2.4.8" \
             -t "$IMAGE:latest" \
             $(printf "$IMAGE@sha256:%s " *)
 
