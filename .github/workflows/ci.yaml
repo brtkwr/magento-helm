@@ -81,6 +81,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/magento-base
     strategy:
+      fail-fast: false
       matrix:
         platform: [linux/amd64, linux/arm64]
         include:
@@ -174,8 +175,9 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/magento
     strategy:
+      fail-fast: false
       matrix:
-        version: ["2.4.6", "2.4.7", "2.4.8"]
+        version: ["2.4.7", "2.4.8"]
         platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
@@ -238,8 +240,9 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/magento
     strategy:
+      fail-fast: false
       matrix:
-        version: ["2.4.6", "2.4.7", "2.4.8"]
+        version: ["2.4.7", "2.4.8"]
     steps:
       - uses: actions/checkout@v4
 
