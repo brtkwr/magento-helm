@@ -390,6 +390,62 @@ image:
   tag: "2.4.8"
 ```
 
+## Local Development Image
+
+`ghcr.io/brtkwr/magento-dev` is the deployed image plus the two things a
+workstation needs: `magerun2`, and an entrypoint that installs the shop against
+compose sidecars on first boot. Both architectures are published, so it runs
+natively on Apple Silicon instead of under emulation.
+
+It installs with the same `setup:install` flags the chart uses (see
+`charts/magento/templates/configmap.yaml`) — keep the two in step, or local dev
+stops resembling what gets deployed.
+
+```yaml
+services:
+  magento:
+    image: ghcr.io/brtkwr/magento-dev:2.4.8
+    container_name: magento
+    ports: ["1234:80"]
+    environment:
+      URL: http://localhost:1234/
+      MYSQL_HOST: db
+      MYSQL_PASSWORD: magento
+      OPENSEARCH_HOST: search
+    volumes:
+      # The module under development, picked up via its registration.php.
+      - ./:/var/www/html/app/code/Two/Gateway
+    depends_on: [db, search]
+  db:
+    image: mariadb:10.6
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: magento
+      MARIADB_USER: magento
+      MARIADB_PASSWORD: magento
+  search:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+```
+
+Notes:
+
+- **Wait on `var/.dev-install-complete`, not `bin/magento --version`.** The CLI
+  answers long before the shop is usable; the entrypoint touches that file only
+  once the install has finished.
+- **Mount the module at `app/code/`, don't `composer require` it.** A require
+  re-resolves the whole dependency tree against `repo.magento.com` and so needs
+  Magento credentials at runtime. The bind mount needs none.
+- **The URL scheme matters.** `setup:install` rejects a non-https
+  `--base-url-secure`, so a plain `http://` dev URL is installed with the secure
+  flags off.
+- Defaults: admin `exampleuser` / `examplepassword123`, database `magento`
+  on host `db`, OpenSearch on `search:9200`. Override via the environment
+  variables read at the top of `docker/dev-entrypoint.sh`.
+
 ## Accessing the Store
 
 After deployment:

@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# Magento local-dev image - adds what a developer workstation needs on top of
+# the deployed image: magerun2 and a first-boot installer that stands the shop
+# up against the compose sidecars.
+# Build: docker buildx build --platform linux/amd64,linux/arm64 --build-arg MAGENTO_VERSION=2.4.8 -f Dockerfile.dev -t ghcr.io/brtkwr/magento-dev:2.4.8 --push .
+ARG MAGENTO_VERSION=2.4.8
+FROM ghcr.io/brtkwr/magento:${MAGENTO_VERSION}
+
+# magerun2 is a PHP phar, so one download serves both architectures.
+ARG MAGERUN_VERSION=7.5.0
+RUN curl -fsSLo /usr/local/bin/magerun2 \
+      "https://files.magerun.net/n98-magerun2-${MAGERUN_VERSION}.phar" \
+    && chmod +x /usr/local/bin/magerun2 \
+    && magerun2 --version
+
+# No composer wiring for the module under development: bind-mount its working
+# tree at app/code/<Vendor>/<Module> and Magento's registration.php picks it up.
+# `composer require` would re-resolve the whole tree against repo.magento.com
+# and so demand Magento credentials at runtime, which a local dev box should
+# not need.
+
+COPY dev-entrypoint.sh /usr/local/bin/dev-entrypoint
+ENTRYPOINT ["dev-entrypoint"]
+CMD ["apache2-foreground"]
