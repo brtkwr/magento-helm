@@ -4,7 +4,9 @@
 FROM php:8.2-apache
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Debian rotates package versions out of the archive, so pinning breaks rebuilds
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libfreetype6-dev \
     libjpeg62-turbo-dev \
     libpng-dev \
@@ -24,7 +26,7 @@ RUN apt-get update && apt-get install -y \
 
 # Configure and install PHP extensions
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-install -j$(nproc) \
+    && docker-php-ext-install -j"$(nproc)" \
     gd \
     bcmath \
     intl \
@@ -41,11 +43,12 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
 RUN a2enmod rewrite headers expires
 
 # Apache configuration for Magento (docroot = /var/www/html/pub)
-RUN echo '<Directory /var/www/html/pub>\n\
-    Options Indexes FollowSymLinks\n\
-    AllowOverride All\n\
-    Require all granted\n\
-</Directory>' > /etc/apache2/conf-available/magento.conf \
+RUN printf '%s\n' \
+    '<Directory /var/www/html/pub>' \
+    '    Options Indexes FollowSymLinks' \
+    '    AllowOverride All' \
+    '    Require all granted' \
+    '</Directory>' > /etc/apache2/conf-available/magento.conf \
     && a2enconf magento \
     && sed -i 's|/var/www/html|/var/www/html/pub|g' /etc/apache2/sites-available/000-default.conf
 

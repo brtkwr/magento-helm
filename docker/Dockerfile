@@ -18,9 +18,9 @@ RUN --mount=type=secret,id=composer_auth,target=/root/.composer/auth.json \
     composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
 # Set permissions
-RUN chown -R www-data:www-data /var/www/html && \
-    find var generated vendor pub/static pub/media app/etc -type f -exec chmod g+w {} + 2>/dev/null || true && \
-    find var generated vendor pub/static pub/media app/etc -type d -exec chmod g+ws {} + 2>/dev/null || true
+RUN chown -R www-data:www-data /var/www/html \
+    && { find var generated vendor pub/static pub/media app/etc -type f -exec chmod g+w {} + 2>/dev/null || true; } \
+    && { find var generated vendor pub/static pub/media app/etc -type d -exec chmod g+ws {} + 2>/dev/null || true; }
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
