@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 # Magento 2.4.8 Base Image - PHP 8.2 + Apache + Extensions
 # Build: docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.base -t ghcr.io/brtkwr/magento-base:php8.2 --push .
-FROM php:8.2-apache
+# Pinned to a patch release so a rebuild cannot reuse an older cached
+# php:8.2-apache. 8.2.35 fixes CVE-2026-109618 / CVE-2026-109619 (PHP core RCE).
+# trixie is the Debian release the floating tag already resolved to.
+FROM php:8.2.35-apache-trixie
 
 # Install system dependencies
 # Debian rotates package versions out of the archive, so pinning breaks rebuilds
@@ -23,6 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cron \
     rsync \
     && rm -rf /var/lib/apt/lists/*
+
+# Fail the build if the PHP in the image is older than the fixed release.
+RUN php -r 'exit(version_compare(PHP_VERSION, "8.2.35", ">=") ? 0 : 1);'
 
 # Configure and install PHP extensions
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
