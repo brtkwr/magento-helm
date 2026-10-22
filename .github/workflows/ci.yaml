@@ -183,7 +183,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ["2.4.7", "2.4.8"]
+        version: ["2.4.8"]
         platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
@@ -248,7 +248,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ["2.4.7", "2.4.8"]
+        version: ["2.4.8"]
     steps:
       - uses: actions/checkout@v4
 
