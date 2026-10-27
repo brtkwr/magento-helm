@@ -149,10 +149,13 @@ spec:
             - --github-app-installation-id={{ .installationId | int64 }}
             {{- end }}
             {{- end }}
-          {{- if or $.Values.gitSync.credentials.githubApp.installationId $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
           env:
+            # /git is a root-owned emptyDir; git-sync >= v4.8.0 no longer trusts it.
+            - name: GITSYNC_GIT_CONFIG
+              value: safe.directory:/git
+            {{- if or $.Values.gitSync.credentials.githubApp.installationId $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
             {{- include "magento.gitSyncAuthEnv" $ | nindent 12 }}
-          {{- end }}
+            {{- end }}
           volumeMounts:
             - mountPath: /git
               name: git-sync-{{ .name }}
@@ -336,10 +339,13 @@ spec:
             - --github-app-installation-id={{ .installationId | int64 }}
             {{- end }}
             {{- end }}
-          {{- if or $.Values.gitSync.credentials.githubApp.installationId $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
           env:
+            # /git is a root-owned emptyDir; git-sync >= v4.8.0 no longer trusts it.
+            - name: GITSYNC_GIT_CONFIG
+              value: safe.directory:/git
+            {{- if or $.Values.gitSync.credentials.githubApp.installationId $.Values.gitSync.credentials.token $.Values.gitSync.credentials.existingSecret }}
             {{- include "magento.gitSyncAuthEnv" $ | nindent 12 }}
-          {{- end }}
+            {{- end }}
           volumeMounts:
             - mountPath: /git
               name: git-sync-{{ .name }}
