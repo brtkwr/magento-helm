@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Magento 2.4.8 Base Image - PHP 8.2 + Apache + Extensions
 # Build: docker buildx build -f Dockerfile.base -t ghcr.io/brtkwr/magento-base:php8.2 --push .
-FROM php:8.2-apache
+FROM europe-north1-docker.pkg.dev/two-artifacts/docker/library/php:8.2-apache
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -65,7 +65,7 @@ RUN echo "opcache.enable=1" > /usr/local/etc/php/conf.d/opcache.ini \
     && echo "opcache.validate_timestamps=0" >> /usr/local/etc/php/conf.d/opcache.ini
 
 # Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY --from=europe-north1-docker.pkg.dev/two-artifacts/docker/library/composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
