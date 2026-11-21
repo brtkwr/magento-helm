@@ -3,8 +3,12 @@
 # Build: docker buildx build -f Dockerfile.base -t ghcr.io/brtkwr/magento-base:php8.2 --push .
 ARG base_image="php:8.2-apache"
 ARG composer_image="composer:2"
+# The tag is in the composer_image ARG default above.
+# hadolint ignore=DL3006
 FROM ${composer_image} AS composer
 
+# The tag is in the base_image ARG default above.
+# hadolint ignore=DL3006
 FROM ${base_image}
 
 # Install system dependencies
