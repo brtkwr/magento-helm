@@ -39,6 +39,9 @@ jobs:
           context: docker
           file: docker/Dockerfile.base
           push: true
+          build-args: |
+            base_image=${{ vars.GAR_REGISTRY }}/${{ vars.GAR_PROJECT }}/docker/library/php:8.2-apache
+            composer_image=${{ vars.GAR_REGISTRY }}/${{ vars.GAR_PROJECT }}/docker/library/composer:2
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:php8.2
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/magento-base:latest
