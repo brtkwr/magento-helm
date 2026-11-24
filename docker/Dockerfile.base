@@ -4,7 +4,17 @@
 # Pinned to a patch release so a rebuild cannot reuse an older cached
 # php:8.2-apache. 8.2.35 fixes CVE-2026-109618 / CVE-2026-109619 (PHP core RCE).
 # trixie is the Debian release the floating tag already resolved to.
-FROM php:8.2.35-apache-trixie
+# CI swaps these Docker Hub defaults for the two-artifacts pull-through cache
+# (two-inc/actions-public/resolve-base-images); local builds use them as-is.
+ARG base_image="php:8.2.35-apache-trixie"
+ARG composer_image="composer:2"
+# The tag is in the composer_image ARG default above.
+# hadolint ignore=DL3006
+FROM ${composer_image} AS composer
+
+# The tag is in the base_image ARG default above.
+# hadolint ignore=DL3006
+FROM ${base_image}
 
 # Install system dependencies
 # Debian rotates package versions out of the archive, so pinning breaks rebuilds
@@ -74,7 +84,7 @@ RUN echo "opcache.enable=1" > /usr/local/etc/php/conf.d/opcache.ini \
     && echo "opcache.validate_timestamps=0" >> /usr/local/etc/php/conf.d/opcache.ini
 
 # Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
