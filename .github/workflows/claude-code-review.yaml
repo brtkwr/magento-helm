@@ -1,0 +1,78 @@
+name: Claude Code Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  actions: read
+  issues: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  code-review:
+    runs-on: ${{ vars.RUNNER_STANDARD }}
+    # Fork PRs get no secrets on pull_request, so the automatic review runs for
+    # same-repo PRs only. On a fork PR a maintainer comments @claude instead.
+    # This repo is public, so a comment only starts the job (self-hosted
+    # runner, secrets) when its author is an owner, org member or
+    # collaborator, and issue comments only on PRs. The action then checks
+    # for write access itself and checks out the default branch, not the
+    # fork's code.
+    if: |
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        vars.CLAUDE_REVIEW_CONFIG != '' &&
+        fromJSON(vars.CLAUDE_REVIEW_CONFIG)[format('{0}:{1}', github.base_ref, github.event.action)] == true
+      ) ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+      )
+    steps:
+      - uses: two-inc/actions-public/claude-reviewer@main
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_app_client_id: ${{ vars.TWO_INC_READ_ONLY_APP_CLIENT_ID }}
+          github_app_private_key: ${{ secrets.TWO_INC_READ_ONLY_APP_PRIVATE_KEY }}
+          extra_prompt: |
+
+            ## Magento Helm Chart Specific Guidelines:
+
+            This is a PUBLIC, general-purpose Magento 2 Helm chart and image set.
+            AGENTS.md is the source of truth; read it first.
+
+            - **No Two-specific logic (blocking)**: outside `.github/workflows/`
+              and `AGENTS.md`, flag any Two or partner name (e.g. ABN AMRO),
+              payment-plugin config, hostname, environment or cluster name, real
+              email address, Linear ticket id, private registry or internal URL.
+              `example.com` placeholders are fine. Say what generic values flag,
+              hook or example value it should become.
+            - **Values flags**: new behaviour sits behind a generically named flag,
+              off by default, so existing installs render unchanged.
+            - **Helm templates**: check rendering with defaults and with each new
+              flag on, and that upgrades keep existing PVCs and Secrets.
+            - **Images**: base images pinned, no secrets baked into layers,
+              composer auth only through BuildKit secrets.
+            - **Security**: pod security context, no privileged containers unless
+              documented, probes and resource requests set.
