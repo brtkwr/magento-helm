@@ -20,9 +20,12 @@ jobs:
   code-review:
     runs-on: ${{ vars.RUNNER_STANDARD }}
     # Fork PRs get no secrets on pull_request, so the automatic review runs for
-    # same-repo PRs only. On a fork PR a maintainer comments @claude instead:
-    # the action acts only for commenters with write access here, and checks
-    # out the default branch rather than the fork's code.
+    # same-repo PRs only. On a fork PR a maintainer comments @claude instead.
+    # This repo is public, so a comment only starts the job (self-hosted
+    # runner, secrets) when its author is an owner, org member or
+    # collaborator, and issue comments only on PRs. The action then checks
+    # for write access itself and checks out the default branch, not the
+    # fork's code.
     if: |
       (
         github.event_name == 'pull_request' &&
@@ -30,9 +33,22 @@ jobs:
         vars.CLAUDE_REVIEW_CONFIG != '' &&
         fromJSON(vars.CLAUDE_REVIEW_CONFIG)[format('{0}:{1}', github.base_ref, github.event.action)] == true
       ) ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+      )
     steps:
       - uses: two-inc/actions-public/claude-reviewer@main
         with:
