@@ -62,11 +62,12 @@ jobs:
             This is a PUBLIC, general-purpose Magento 2 Helm chart and image set.
             AGENTS.md is the source of truth; read it first.
 
-            - **No Two-specific logic (blocking)**: outside `.github/`, flag any
-              Two or partner name (e.g. ABN AMRO), payment-plugin config, hostname,
-              environment or cluster name, email address, Linear ticket id, private
-              registry or internal URL. Say what generic values flag, hook or
-              example value it should become.
+            - **No Two-specific logic (blocking)**: outside `.github/` and
+              `AGENTS.md`, flag any Two or partner name (e.g. ABN AMRO),
+              payment-plugin config, hostname, environment or cluster name, real
+              email address, Linear ticket id, private registry or internal URL.
+              `example.com` placeholders are fine. Say what generic values flag,
+              hook or example value it should become.
             - **Values flags**: new behaviour sits behind a generically named flag,
               off by default, so existing installs render unchanged.
             - **Helm templates**: check rendering with defaults and with each new
