@@ -13,7 +13,7 @@ Deploy Magento 2.4.8 on Kubernetes with git-sync support for live plugin develop
 
 ```bash
 # Using OCI registry
-helm install magento oci://ghcr.io/brtkwr/charts/magento \
+helm install magento oci://europe-north1-docker.pkg.dev/two-artifacts/helm/magento \
   --set magento.host=magento.example.com \
   --set adminUsers[0].password=YourSecurePassword123 \
   --set database.password=YourDBPassword123
@@ -182,7 +182,7 @@ resources:
 ```
 
 ```bash
-helm install magento oci://ghcr.io/brtkwr/charts/magento \
+helm install magento oci://europe-north1-docker.pkg.dev/two-artifacts/helm/magento \
   -f values-production.yaml \
   --set adminUsers[0].password=$ADMIN_PASSWORD \
   --set database.password=$DB_PASSWORD
