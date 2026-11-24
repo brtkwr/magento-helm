@@ -40,5 +40,5 @@ ships in the chart or an image.
 
 ## Reviewing
 
-Any Two-specific string or behaviour outside `.github/` and this file is a blocking finding.
+Any Two-specific string or behaviour outside `.github/workflows/` and this file is a blocking finding.
 Say what to generalise it into, using the rules above.
