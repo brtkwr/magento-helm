@@ -4,8 +4,9 @@
 # Pinned to a patch release so a rebuild cannot reuse an older cached
 # php:8.2-apache. 8.2.35 fixes CVE-2026-109618 / CVE-2026-109619 (PHP core RCE).
 # trixie is the Debian release the floating tag already resolved to.
-# CI swaps these Docker Hub defaults for the two-artifacts pull-through cache
-# (two-inc/actions-public/resolve-base-images); local builds use them as-is.
+# CI passes these same tags through a pull-through cache as literal
+# build-args (see the workflows), so bump both together; local builds
+# use the Docker Hub defaults as-is.
 ARG base_image="php:8.2.35-apache-trixie"
 ARG composer_image="composer:2"
 # The tag is in the composer_image ARG default above.
