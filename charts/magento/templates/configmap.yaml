@@ -851,6 +851,32 @@ data:
     ) &
     {{- end }}
 
+    {{- if .Values.cron.enabled }}
+    # Magento cron: run `bin/magento cron:run` as www-data, sleep, repeat.
+    # Started here, once setup has finished, so it runs against the same
+    # filesystem the web server does (materialised git-sync plugins, the
+    # app/code links, generated/). It runs in the background, so it never
+    # holds up Apache or its probes, and it outlives this script, as the
+    # git-sync watcher does. Output goes to the container's own
+    # stdout/stderr (PID 1's), not setup.log, so `kubectl logs` shows it with
+    # a [magento-cron] prefix. A failed run is logged and the loop carries on.
+    # The container-local lock keeps it to one loop if this script is re-run.
+    (
+      set +e
+      exec 9>/tmp/magento-cron.lock
+      flock -n 9 || { echo "Magento cron loop already running, not starting another"; exit 0; }
+      exec >/proc/1/fd/1 2>/proc/1/fd/2
+      echo "[magento-cron] started: bin/magento cron:run every {{ .Values.cron.intervalSeconds | int }}s"
+      while true; do
+        mage cron:run 2>&1 | sed -u 's/^/[magento-cron] /'
+        status=${PIPESTATUS[0]}
+        [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ .Values.cron.intervalSeconds | int }}s"
+        sleep {{ .Values.cron.intervalSeconds | int }}
+      done
+    ) &
+    echo "Starting the Magento cron loop in the background (it logs to the container's stdout)"
+    {{- end }}
+
     # Reload Apache to pick up any changes
     apachectl -k graceful || true
 

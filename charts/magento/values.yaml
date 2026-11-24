@@ -396,6 +396,26 @@ resources:
       memory: "384Mi"
       cpu: "500m"
 
+# Magento cron (scheduled jobs: indexers, emails, cleanup, and any
+# module-defined crontab.xml jobs). Off by default, so nothing runs
+# Magento's scheduler unless you turn it on.
+#
+# When enabled, the postStart setup script starts a background loop in the
+# magento container once setup has finished. It runs `bin/magento cron:run`
+# as www-data from the Magento root, then sleeps intervalSeconds, forever.
+# Because it runs in the web container it sees everything setup put there,
+# including git-sync plugins and a runtime setup:di:compile. It does not
+# delay Apache or its probes. Its output goes to the container's stdout
+# with a [magento-cron] prefix (`kubectl logs <pod> -c magento`); Magento's
+# own cron log stays in var/log/cron.log on the PVC. A failed run is logged
+# and the loop carries on. It shares the magento container's resources
+# (resources.magento), so allow headroom for cron jobs there.
+cron:
+  enabled: false
+  # Seconds to sleep between runs. Magento schedules jobs per minute, so 60
+  # is the usual value.
+  intervalSeconds: 60
+
 # Health checks
 healthCheck:
   # Increased to allow init-setup container to complete before main container health check
