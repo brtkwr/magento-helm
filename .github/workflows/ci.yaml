@@ -397,7 +397,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.chart == 'true'
     permissions:
       contents: write
-      packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -415,8 +415,18 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
 
-      - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          token_format: access_token
+          service_account: gha-artifact-registry-helm@two-artifacts.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER_PREFIX_TWO_ARTIFACTS }}/magento-helm
+
+      - name: Login to Google Artifact Registry
+        env:
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: echo "$TOKEN" | helm registry login europe-north1-docker.pkg.dev -u oauth2accesstoken --password-stdin
 
       - name: Package and push chart
         run: |
@@ -424,4 +434,4 @@ jobs:
           sed -i "s/^version:.*/version: ${{ steps.version.outputs.new_version }}/" charts/magento/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${app_version}\"/" charts/magento/Chart.yaml
           helm package charts/magento
-          helm push magento-${{ steps.version.outputs.new_version }}.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+          helm push magento-${{ steps.version.outputs.new_version }}.tgz oci://europe-north1-docker.pkg.dev/two-artifacts/helm

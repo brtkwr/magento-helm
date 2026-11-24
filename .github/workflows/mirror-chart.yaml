@@ -1,7 +1,7 @@
 name: Mirror Chart
 
 # One-off copy of already-released chart versions from the old personal
-# registry into this repo owner's registry, so deployments can be repointed
+# registry into two-artifacts, so deployments can be repointed
 # without changing chart content. Run it by hand after the repo transfer.
 on:
   workflow_dispatch:
@@ -21,24 +21,31 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      id-token: write
     steps:
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
           version: v3.13.0
 
-      - name: Login to GHCR
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          token_format: access_token
+          service_account: gha-artifact-registry-helm@two-artifacts.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER_PREFIX_TWO_ARTIFACTS }}/magento-helm
+
+      - name: Login to Google Artifact Registry
         env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ACTOR: ${{ github.actor }}
-        run: echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: echo "$TOKEN" | helm registry login europe-north1-docker.pkg.dev -u oauth2accesstoken --password-stdin
 
       - name: Copy versions
         env:
           VERSIONS: ${{ inputs.versions }}
           SOURCE: ${{ inputs.source }}
-          TARGET: oci://ghcr.io/${{ github.repository_owner }}/charts
+          TARGET: oci://europe-north1-docker.pkg.dev/two-artifacts/helm
         run: |
           set -euo pipefail
           if [ "$SOURCE" = "$TARGET" ]; then
