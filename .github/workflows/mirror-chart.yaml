@@ -52,13 +52,26 @@ jobs:
             echo "::error::source and target are the same registry ($TARGET)"
             exit 1
           fi
+          # helm pull from ghcr asks for an extra scope that ghcr refuses (403),
+          # so fetch the chart layer with an anonymous token instead and check
+          # its sha256 against the manifest: the push is then byte for byte.
+          case "$SOURCE" in
+            oci://ghcr.io/*) repo="${SOURCE#oci://ghcr.io/}/magento" ;;
+            *) echo "::error::source must be an oci://ghcr.io/ path"; exit 1 ;;
+          esac
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token)
           for version in $VERSIONS; do
             if helm show chart "$TARGET/magento" --version "$version" >/dev/null 2>&1; then
               echo "magento $version already in $TARGET, leaving it alone"
               continue
             fi
-            helm pull "$SOURCE/magento" --version "$version"
-            sha256sum "magento-$version.tgz"
+            digest=$(curl -fsS -H "Authorization: Bearer $token" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+              "https://ghcr.io/v2/${repo}/manifests/${version}" \
+              | jq -r '.layers[] | select(.mediaType == "application/vnd.cncf.helm.chart.content.v1.tar+gzip") | .digest')
+            curl -fsSL -H "Authorization: Bearer $token" -o "magento-$version.tgz" \
+              "https://ghcr.io/v2/${repo}/blobs/${digest}"
+            echo "${digest#sha256:}  magento-$version.tgz" | sha256sum -c -
             helm push "magento-$version.tgz" "$TARGET"
             helm show chart "$TARGET/magento" --version "$version" | grep -x "version: $version"
           done
