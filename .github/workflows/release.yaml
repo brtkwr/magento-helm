@@ -42,6 +42,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Org variables exist only once the repo lives in two-inc; until then
+      # the step is skipped and the Dockerfile's Docker Hub defaults are used.
+      - name: Resolve base images
+        id: base_images
+        if: vars.GAR_REGISTRY != ''
+        uses: two-inc/actions-public/resolve-base-images@main
+        with:
+          dockerfile: docker/Dockerfile.base
+          args: base_image composer_image
+          cache: ${{ vars.GAR_REGISTRY }}/${{ vars.GAR_PROJECT }}/docker
+
       - name: Build and push base image by digest
         id: build
         uses: docker/build-push-action@v5
@@ -49,6 +60,8 @@ jobs:
           context: docker
           file: docker/Dockerfile.base
           platforms: ${{ matrix.platform }}
+          build-args: |
+            ${{ steps.base_images.outputs.build-args }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=base-${{ env.PLATFORM_PAIR }}
           cache-to: type=gha,mode=max,scope=base-${{ env.PLATFORM_PAIR }}
