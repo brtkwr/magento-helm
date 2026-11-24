@@ -1,0 +1,57 @@
+name: Mirror Chart
+
+# One-off copy of already-released chart versions from the old personal
+# registry into this repo owner's registry, so deployments can be repointed
+# without changing chart content. Run it by hand after the repo transfer.
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: Chart versions to copy, separated by spaces
+        required: true
+        default: "0.20.1 0.22.0"
+      source:
+        description: OCI registry path to copy from
+        required: true
+        default: oci://ghcr.io/brtkwr/charts
+
+jobs:
+  mirror:
+    name: Mirror chart versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.13.0
+
+      - name: Login to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Copy versions
+        env:
+          VERSIONS: ${{ inputs.versions }}
+          SOURCE: ${{ inputs.source }}
+          TARGET: oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          set -euo pipefail
+          if [ "$SOURCE" = "$TARGET" ]; then
+            echo "::error::source and target are the same registry ($TARGET)"
+            exit 1
+          fi
+          for version in $VERSIONS; do
+            if helm show chart "$TARGET/magento" --version "$version" >/dev/null 2>&1; then
+              echo "magento $version already in $TARGET, leaving it alone"
+              continue
+            fi
+            helm pull "$SOURCE/magento" --version "$version"
+            sha256sum "magento-$version.tgz"
+            helm push "magento-$version.tgz" "$TARGET"
+            helm show chart "$TARGET/magento" --version "$version" | grep -x "version: $version"
+          done
