@@ -848,6 +848,10 @@ data:
     {{- end }}
 
     {{- if .Values.cron.enabled }}
+    {{- $cronInterval := int .Values.cron.intervalSeconds }}
+    {{- if lt $cronInterval 1 }}
+    {{- fail (printf "cron.intervalSeconds must be a whole number of seconds, 1 or more (got %v)" .Values.cron.intervalSeconds) }}
+    {{- end }}
     # Magento cron: run `bin/magento cron:run` as www-data, sleep, repeat.
     # Started here, once setup has finished, so it runs against the same
     # filesystem the web server does (materialised git-sync plugins, the
@@ -862,7 +866,7 @@ data:
       exec 9>/tmp/magento-cron.lock
       flock -n 9 || { echo "Magento cron loop already running, not starting another"; exit 0; }
       exec >/proc/1/fd/1 2>/proc/1/fd/2
-      echo "[magento-cron] started: bin/magento cron:run every {{ .Values.cron.intervalSeconds | int }}s"
+      echo "[magento-cron] started: bin/magento cron:run every {{ $cronInterval }}s"
       while true; do
         # Skip this run while a rebuild holds .static-rebuild.lock: the
         # rebuild wipes and recompiles generated/ without maintenance mode,
@@ -875,9 +879,9 @@ data:
           # 9>&- so cron's background children don't inherit the loop lock.
           mage cron:run 9>&- 2>&1 | sed -u 's/^/[magento-cron] /'
           status=${PIPESTATUS[0]}
-          [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ .Values.cron.intervalSeconds | int }}s"
+          [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ $cronInterval }}s"
         fi
-        sleep {{ .Values.cron.intervalSeconds | int }}
+        sleep {{ $cronInterval }}
       done
     ) &
     echo "Starting the Magento cron loop in the background (it logs to the container's stdout)"
