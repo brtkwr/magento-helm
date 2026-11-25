@@ -848,10 +848,10 @@ data:
     {{- end }}
 
     {{- if .Values.cron.enabled }}
-    {{- $cronInterval := int .Values.cron.intervalSeconds }}
-    {{- if lt $cronInterval 1 }}
+    {{- if not (regexMatch "^[1-9][0-9]*$" (toString .Values.cron.intervalSeconds)) }}
     {{- fail (printf "cron.intervalSeconds must be a whole number of seconds, 1 or more (got %v)" .Values.cron.intervalSeconds) }}
     {{- end }}
+    {{- $cronInterval := int .Values.cron.intervalSeconds }}
     # Magento cron: run `bin/magento cron:run` as www-data, sleep, repeat.
     # Started here, once setup has finished, so it runs against the same
     # filesystem the web server does (materialised git-sync plugins, the
