@@ -872,7 +872,8 @@ data:
         if ! flock -n 8 8>>/var/www/html/var/.static-rebuild.lock; then
           echo "[magento-cron] rebuild in progress, skipping this run"
         else
-          mage cron:run 2>&1 | sed -u 's/^/[magento-cron] /'
+          # 9>&- so cron's background children don't inherit the loop lock.
+          mage cron:run 9>&- 2>&1 | sed -u 's/^/[magento-cron] /'
           status=${PIPESTATUS[0]}
           [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ .Values.cron.intervalSeconds | int }}s"
         fi
