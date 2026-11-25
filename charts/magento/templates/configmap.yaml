@@ -278,20 +278,16 @@ data:
       }
       {{- end }}
 
-      # Flush all caches after di:compile (ABN-415 workaround).
+      # Flush all caches after di:compile.
       #
-      # The structure-cache file at
-      #   var/cache/mage--*/mage---*_ADMINHTML__BACKEND_SYSTEM_CONFIGURATION_STRUCTURE
-      # is written into the `data` PVC under the `magento/var` subpath, so it
-      # persists across pod restarts. A previous pod that completed
-      # Reader::read without a brand-overlay synthesis plugin (e.g. because
-      # the plugin's DI metadata pointed at an older constructor signature)
-      # leaves a cache file that has the static abn_gateway tab but NO
-      # synthesised abn_payment / abn_general / abn_search / abn_version
-      # sections. The new pod inherits that cache, Scoped::_loadScopedData
-      # hits the cache on the first admin request, never calls Reader::read,
-      # and the synthesis plugin never fires for the pod's lifetime — the
-      # ABN admin tab disappears.
+      # The admin system-configuration structure cache lives in var/cache on
+      # the `data` PVC (the `magento/var` subpath), so it persists across pod
+      # restarts. If a previous pod built that cache while a module's plugins
+      # were missing or out of date (for example, DI metadata pointing at an
+      # older constructor signature), the new pod reads the stale cache on the
+      # first admin request instead of rebuilding the structure. Any admin
+      # config sections that a plugin adds at read time then stay missing for
+      # the pod's lifetime.
       #
       # Wiping after setup:di:compile guarantees that the next Reader::read
       # picks up the freshly-deployed plugin set (and the freshly-compiled
@@ -404,7 +400,7 @@ data:
     # exists — in Magento 2.4.x it upserts and resets the password to the
     # value supplied. Calling it unconditionally on every pod restart means
     # any password reset performed via the admin UI is reverted to the
-    # secret-backed default on the next rollout (see ABN-419). Probe the
+    # secret-backed default on the next rollout. Probe the
     # admin_user table directly via Magento's bootstrap and only invoke
     # create for genuinely missing users. The DB probe is reliable across
     # Magento versions; matching on CLI error strings is not.
@@ -849,6 +845,46 @@ data:
         sleep {{ .Values.gitSync.reload.pollIntervalSeconds }}
       done
     ) &
+    {{- end }}
+
+    {{- if .Values.cron.enabled }}
+    {{- if not (regexMatch "^[1-9][0-9]*$" (toString .Values.cron.intervalSeconds)) }}
+    {{- fail (printf "cron.intervalSeconds must be a whole number of seconds, 1 or more (got %v)" .Values.cron.intervalSeconds) }}
+    {{- end }}
+    {{- $cronInterval := int .Values.cron.intervalSeconds }}
+    # Magento cron: run `bin/magento cron:run` as www-data, sleep, repeat.
+    # Started here, once setup has finished, so it runs against the same
+    # filesystem the web server does (materialised git-sync plugins, the
+    # app/code links, generated/). It runs in the background, so it never
+    # holds up Apache or its probes, and it outlives this script, as the
+    # git-sync watcher does. Output goes to the container's own
+    # stdout/stderr (PID 1's), not setup.log, so `kubectl logs` shows it with
+    # a [magento-cron] prefix. A failed run is logged and the loop carries on.
+    # The container-local lock keeps it to one loop if this script is re-run.
+    (
+      set +e
+      exec 9>/tmp/magento-cron.lock
+      flock -n 9 || { echo "Magento cron loop already running, not starting another"; exit 0; }
+      exec >/proc/1/fd/1 2>/proc/1/fd/2
+      echo "[magento-cron] started: bin/magento cron:run every {{ $cronInterval }}s"
+      while true; do
+        # Skip this run while a rebuild holds .static-rebuild.lock: the
+        # rebuild wipes and recompiles generated/ without maintenance mode,
+        # and cron:run doesn't check maintenance mode anyway. Only test the
+        # lock (flock exits at once and releases it); holding it would make
+        # the git-sync watcher skip its rebuild.
+        if ! flock -n 8 8>>/var/www/html/var/.static-rebuild.lock; then
+          echo "[magento-cron] rebuild in progress, skipping this run"
+        else
+          # 9>&- so cron's background children don't inherit the loop lock.
+          mage cron:run 9>&- 2>&1 | sed -u 's/^/[magento-cron] /'
+          status=${PIPESTATUS[0]}
+          [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ $cronInterval }}s"
+        fi
+        sleep {{ $cronInterval }}
+      done
+    ) &
+    echo "Starting the Magento cron loop in the background (it logs to the container's stdout)"
     {{- end }}
 
     # Reload Apache to pick up any changes
