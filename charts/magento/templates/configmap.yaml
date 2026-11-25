@@ -864,9 +864,18 @@ data:
       exec >/proc/1/fd/1 2>/proc/1/fd/2
       echo "[magento-cron] started: bin/magento cron:run every {{ .Values.cron.intervalSeconds | int }}s"
       while true; do
-        mage cron:run 2>&1 | sed -u 's/^/[magento-cron] /'
-        status=${PIPESTATUS[0]}
-        [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ .Values.cron.intervalSeconds | int }}s"
+        # Skip this run while a rebuild holds .static-rebuild.lock: the
+        # rebuild wipes and recompiles generated/ without maintenance mode,
+        # and cron:run doesn't check maintenance mode anyway. Only test the
+        # lock (flock exits at once and releases it); holding it would make
+        # the git-sync watcher skip its rebuild.
+        if ! flock -n 8 8>>/var/www/html/var/.static-rebuild.lock; then
+          echo "[magento-cron] rebuild in progress, skipping this run"
+        else
+          mage cron:run 2>&1 | sed -u 's/^/[magento-cron] /'
+          status=${PIPESTATUS[0]}
+          [ "$status" -eq 0 ] || echo "[magento-cron] cron:run exited with status $status, retrying in {{ .Values.cron.intervalSeconds | int }}s"
+        fi
         sleep {{ .Values.cron.intervalSeconds | int }}
       done
     ) &
