@@ -278,20 +278,16 @@ data:
       }
       {{- end }}
 
-      # Flush all caches after di:compile (ABN-415 workaround).
+      # Flush all caches after di:compile.
       #
-      # The structure-cache file at
-      #   var/cache/mage--*/mage---*_ADMINHTML__BACKEND_SYSTEM_CONFIGURATION_STRUCTURE
-      # is written into the `data` PVC under the `magento/var` subpath, so it
-      # persists across pod restarts. A previous pod that completed
-      # Reader::read without a brand-overlay synthesis plugin (e.g. because
-      # the plugin's DI metadata pointed at an older constructor signature)
-      # leaves a cache file that has the static abn_gateway tab but NO
-      # synthesised abn_payment / abn_general / abn_search / abn_version
-      # sections. The new pod inherits that cache, Scoped::_loadScopedData
-      # hits the cache on the first admin request, never calls Reader::read,
-      # and the synthesis plugin never fires for the pod's lifetime — the
-      # ABN admin tab disappears.
+      # The admin system-configuration structure cache lives in var/cache on
+      # the `data` PVC (the `magento/var` subpath), so it persists across pod
+      # restarts. If a previous pod built that cache while a module's plugins
+      # were missing or out of date (for example, DI metadata pointing at an
+      # older constructor signature), the new pod reads the stale cache on the
+      # first admin request instead of rebuilding the structure. Any admin
+      # config sections that a plugin adds at read time then stay missing for
+      # the pod's lifetime.
       #
       # Wiping after setup:di:compile guarantees that the next Reader::read
       # picks up the freshly-deployed plugin set (and the freshly-compiled
@@ -404,7 +400,7 @@ data:
     # exists — in Magento 2.4.x it upserts and resets the password to the
     # value supplied. Calling it unconditionally on every pod restart means
     # any password reset performed via the admin UI is reverted to the
-    # secret-backed default on the next rollout (see ABN-419). Probe the
+    # secret-backed default on the next rollout. Probe the
     # admin_user table directly via Magento's bootstrap and only invoke
     # create for genuinely missing users. The DB probe is reliable across
     # Magento versions; matching on CLI error strings is not.
