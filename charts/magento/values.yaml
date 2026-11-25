@@ -410,7 +410,10 @@ resources:
 # own cron log stays in var/log/cron.log on the PVC. A failed run is logged
 # and the loop carries on. It shares the magento container's resources
 # (resources.magento), so allow headroom for cron jobs there. Runs are
-# skipped while a git-sync rebuild holds var/.static-rebuild.lock.
+# skipped while a git-sync rebuild holds var/.static-rebuild.lock. The
+# lock is only checked when a run starts, so a run already under way (and
+# the separate-process cron groups and queue consumers it launched) is not
+# stopped by a rebuild.
 #
 # Use either this loop or an external cron, not both. By default cron:run
 # also starts long-lived queue:consumers:start processes; they share
