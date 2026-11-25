@@ -297,7 +297,11 @@ cron:
 
 When enabled, the postStart setup script (`setup.sh`) starts a background loop once setup has finished. The loop runs `bin/magento cron:run` as `www-data` from the Magento root, sleeps, and repeats. Because it runs in the web container, it sees everything setup put there, including git-sync plugins and a runtime `setup:di:compile`. It doesn't delay Apache or its probes, and it stops with the container.
 
-A failed run is logged and the loop carries on. Its output goes to the container's stdout with a `[magento-cron]` prefix, so `kubectl logs deploy/magento -c magento | grep magento-cron` shows it; Magento's own log is `var/log/cron.log`. The loop shares the `magento` container's resources (`resources.magento`), so leave headroom there for your cron jobs.
+A failed run is logged and the loop carries on. Its output goes to the container's stdout with a `[magento-cron]` prefix, so `kubectl logs deploy/magento -c magento | grep magento-cron` shows it; Magento's own log is `var/log/cron.log`. The loop shares the `magento` container's resources (`resources.magento`), so leave headroom there for your cron jobs. Runs are skipped while a git-sync rebuild holds `var/.static-rebuild.lock`.
+
+- Use either this loop or an external cron, not both.
+- By default `cron:run` also starts long-lived `queue:consumers:start` processes (Magento's `cron_consumers_runner`). They share `resources.magento` and keep running the old code after a rebuild until they exit. To stop cron starting them, set `'cron_consumers_runner' => ['cron_run' => false]` in `env.php`.
+- If `setup.sh` stops before the end, the loop doesn't start. Look for the "Starting the Magento cron loop" line in `var/log/setup.log`.
 
 ## Static Content Deployment
 

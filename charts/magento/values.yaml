@@ -409,7 +409,15 @@ resources:
 # with a [magento-cron] prefix (`kubectl logs <pod> -c magento`); Magento's
 # own cron log stays in var/log/cron.log on the PVC. A failed run is logged
 # and the loop carries on. It shares the magento container's resources
-# (resources.magento), so allow headroom for cron jobs there.
+# (resources.magento), so allow headroom for cron jobs there. Runs are
+# skipped while a git-sync rebuild holds var/.static-rebuild.lock.
+#
+# Use either this loop or an external cron, not both. By default cron:run
+# also starts long-lived queue:consumers:start processes; they share
+# resources.magento and keep running old code after a rebuild until they
+# exit. To stop that, set 'cron_consumers_runner' => ['cron_run' => false]
+# in env.php. If setup.sh stops before the end, the loop doesn't start:
+# look for "Starting the Magento cron loop" in var/log/setup.log.
 cron:
   enabled: false
   # Seconds to sleep between runs. Magento schedules jobs per minute, so 60
